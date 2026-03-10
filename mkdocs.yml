@@ -1,0 +1,70 @@
+site_name: templex
+site_description: Object-based, bidirectional string templating with declarative result types
+site_url: https://your-org.github.io/templex
+repo_url: https://github.com/your-org/templex
+repo_name: your-org/templex
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - content.code.annotate
+    - search.suggest
+    - search.highlight
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: numpy
+            show_source: true
+            show_root_heading: true
+            show_category_heading: true
+            members_order: source
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.details
+  - attr_list
+  - md_in_html
+
+nav:
+  - Home: index.md
+  - Guide:
+      - guide/quickstart.md
+      - guide/tokens.md
+      - guide/models.md
+      - guide/slots.md
+      - guide/string_templates.md
+      - guide/delimiters.md
+  - API Reference:
+      - api/templatemodel.md
+      - api/tokens.md
+      - api/slot.md
+      - api/config.md
+      - api/exceptions.md
+  - Changelog: CHANGELOG.md
