@@ -1,9 +1,9 @@
 # templex
 
-[![CI](https://github.com/your-org/templex/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/templex/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/your-org/templex/branch/main/graph/badge.svg)](https://codecov.io/gh/your-org/templex)
-[![PyPI](https://img.shields.io/pypi/v/templex)](https://pypi.org/project/templex/)
-[![Python](https://img.shields.io/pypi/pyversions/templex)](https://pypi.org/project/templex/)
+[![Tests](https://github.com/PoloB/templex/actions/workflows/ci.yml/badge.svg)](https://github.com/PoloB/templex/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/PoloB/templex/graph/badge.svg?token=KNWN8UT6OK)](https://codecov.io/gh/PoloB/templex)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Checked with mypy](https://www.mypy-lang.org/static/mypy_badge.svg)](https://mypy-lang.org/)
 
 **Object-based, bidirectional string templating with declarative result types.**
 
