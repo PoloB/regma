@@ -1,46 +1,191 @@
-"""
-templex.model
-~~~~~~~~~~~~~
-Field descriptor, TemplateModelMeta, and TemplateModel base class.
-
-Import order (no circular dependencies)
-----------------------------------------
-exceptions  ← no templex deps
-config      ← no templex deps
-core        ← no templex deps
-tokens      ← core, exceptions
-slot        ← core  (TemplateModel referenced only under TYPE_CHECKING)
-template_parser ← core, exceptions, slot
-model       ← all of the above  ✓
-"""
+"""Template model implementation."""
 
 from __future__ import annotations
 
+import enum
+import re
 from typing import Any
+from typing import TypeVar
 
-from templex.config import Delimiter
-from templex.core import RegexBuilder, Templatable
-from templex.exceptions import DefinitionError, ParseError
-from templex.meta import TemplateModelMeta
+from typing_extensions import Self
+from typing_extensions import dataclass_transform
+from typing_extensions import override
+
+from templex.core import AbstractToken
+from templex.core import BoundToken
+from templex.core import Chain
+from templex.core import RegexBuilder
+from templex.core import T_token
+from templex.error import DefinitionError
+from templex.template_parser import parse_template
+from templex.token import ChoiceToken
+from templex.token import CustomToken
+from templex.token import IntToken
+from templex.token import StrToken
 
 
+class Delimiter(enum.Enum):
+    """Token delimiter styles for string templates.
+
+    Each variant carries its open/close characters and can compile
+    its own token regex — template_parser.py stays delimiter-agnostic.
+
+    Examples:
+    CURLY  →  {asset_source.type}/{asset_source}
+    ANGLE  →  <asset_source.type>/<asset_source>
+    SQUARE →  [asset_source.type]/[asset_source]
+    """
+
+    CURLY = ("{", "}")
+    ANGLE = ("<", ">")
+    SQUARE = ("[", "]")
+
+    @property
+    def token_open(self) -> str:
+        """Return the open token of the delimiter."""
+        return self.value[0]
+
+    @property
+    def token_close(self) -> str:
+        """Return the close token of the delimiter."""
+        return self.value[1]
+
+    def token_re(self) -> re.Pattern[str]:
+        """Compile and return the regex that matches one token placeholder."""
+        o = re.escape(self.token_open)
+        c = re.escape(self.token_close)
+        ident = r"[A-Za-z_][A-Za-z0-9_]*"
+        return re.compile(rf"{o}({ident}(?:\.{ident})*){c}")
+
+
+class TemplateModelMeta(type):
+    """Validates and wires up a TemplateModel subclass at definition time.
+
+    1. Injects ``name`` into all :class:`Field` and :class:`~templex.slot.Slot`
+       descriptors.
+    2. Normalizes ``template`` (string or :class:`~templex.core.Chain`) and
+       compiles a full regex.
+    3. Validates that every Field/Slot appears in the chain (and vice versa).
+    4. Validates sub-field accesses (``slot.field``) against the sub-model.
+    """
+
+    __bound_tokens__: dict[str, BoundToken[Any]] = {}  # noqa: RUF012
+    __template__: str
+    __delimiter__: Delimiter
+    __chain__: Chain
+    __regex__: str
+
+    def __new__(
+        mcs,
+        name: str,
+        bases: tuple[type, ...],
+        namespace: dict[str, Any],
+        **kwargs: Any,  # noqa: ANN401
+    ) -> TemplateModelMeta:
+        """Build the template model internals (tokens -> bound tokens, chain, regex)."""
+        cls = super().__new__(mcs, name, bases, namespace, **kwargs)
+
+        # Skip the bare TemplateModel base itself
+        if name == "TemplateModel":
+            return cls
+
+        if TemplateModel.__name__ not in {b.__name__ for b in bases}:
+            msg = f"{name}: must be subclass of {TemplateModel.__name__}"
+            raise DefinitionError(msg)
+
+        # Create bounded token objects
+        bound_tokens: dict[str, BoundToken[Any]] = {}
+
+        for attr, value in namespace.items():
+            if isinstance(value, AbstractToken):
+                bound_tokens[attr] = BoundToken(attr, value)
+
+        cls.__bound_tokens__ = bound_tokens
+
+        # Validate template
+        raw_template: Any = namespace.get("__template__")
+        if raw_template is None:
+            msg = f"{name}: must define a '__template__'"
+            raise DefinitionError(msg)
+
+        contents = [namespace, *[b.__dict__ for b in bases]]
+        # Go through all bases to get the delimiter
+        delimiters = (c.get("__delimiter__") for c in contents)
+        delimiter = next(d for d in delimiters if d is not None)
+
+        if not isinstance(delimiter, Delimiter):
+            msg = (
+                f"{name}: __delimiter__ must be a {Delimiter.__name__} instance, "
+                f"got {type(delimiter).__name__!r}"
+            )
+            raise DefinitionError(msg)
+
+        chain: Chain = parse_template(cls)
+        cls.__chain__ = chain
+
+        # Go through all bases to get the regex builder
+        regex_builders = (c.get("__regex_builder__") for c in contents)
+        regex_builder = next(d for d in regex_builders if d is not None)
+
+        if not isinstance(regex_builder, RegexBuilder):
+            msg = (
+                f"{name}: __regex_builder__ must be a {RegexBuilder.__name__} instance, "
+                f"got {type(regex_builder).__name__!r}"
+            )
+            raise DefinitionError(msg)
+
+        cls.__regex__ = cls.__chain__.to_regex(regex_builder)
+
+        return cls
+
+
+T_token_model = TypeVar("T_token_model", bound="TemplateModel")
+
+
+class ModelToken(AbstractToken[T_token_model]):
+    """A template model wrapped as a token."""
+
+    def __init__(self, model_cls: type[T_token_model]) -> None:
+        """Initialize the model token."""
+        self._model = model_cls
+
+    @override
+    def to_regex(self, builder: RegexBuilder) -> str:
+        return self._model.__chain__.to_regex(builder)
+
+    @override
+    def format(self, value: T_token) -> str:
+        raise NotImplementedError
+
+    @override
+    def parse(self, raw: str) -> T_token_model:
+        return self._model.parse(raw)
+
+    def __getattr__(self, item: str) -> Any:  # noqa: ANN401
+        """Return the attribute of the underlying model class."""
+        return getattr(self._model, item)
+
+
+@dataclass_transform(
+    field_specifiers=(StrToken, IntToken, ChoiceToken, CustomToken, ModelToken),
+)
 class TemplateModel(metaclass=TemplateModelMeta):
-    """Base class for all declarative template models.
+    r"""Base class for all declarative template models.
 
-    Subclass to declare a typed, bidirectional string template::
+    Subclass to declare a typed, bidirectional string template:
 
-        class AssetResult(TemplateModel):
-            type: str = Field(ASSET_TYPE)
-            code: str = Field(ASSET_CODE)
-            template = ASSET_TYPE >> "_" >> ASSET_CODE
+    class AssetResult(TemplateModel):
+        type: str = StrToken("[a-zA-Z]+")
+        code: str = StrToken("\w+")
+        __template__ = "{asset_type}_{code}"
 
-    Parse::
+    Parse:
 
         result = AssetResult.parse("chr_toto")
         result.type   # "chr"
         result.code   # "toto"
 
-    Format::
+    Format:
 
         str(result)   # "chr_toto"
     """
@@ -48,125 +193,30 @@ class TemplateModel(metaclass=TemplateModelMeta):
     # Populated by metaclass
     __delimiter__ = Delimiter.CURLY
     __regex_builder__ = RegexBuilder()
-    __templatables__: dict[str, Templatable]
+    __bound_tokens__: dict[str, BoundToken[Any]]
     __template__: str
 
-    def __init__(self, **kwargs: Any) -> None:
-        for field_name, field in self._fields.items():
-            value = kwargs.get(field_name, field.token.default)
-            setattr(self, field_name, value)
-        for slot_name in self._slots:
-            value = kwargs.get(slot_name)
-            setattr(self, slot_name, value)
+    def __init__(self, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
+        """Initialize the template model with given kwargs arguments."""
+        fields = list(self.__bound_tokens__)
+
+        for i, value in enumerate(args):
+            name = fields[i]
+            kwargs[name] = value
+
+        for name in fields:
+            if name in kwargs:
+                setattr(self, name, kwargs[name])
+            else:
+                msg = f"Missing required token: '{name}'"
+                raise TypeError(msg)
 
     @classmethod
     def construct_regex(cls, builder: RegexBuilder) -> str:
+        """Construct the regex of this module using the given builder."""
         return cls.__chain__.to_regex(builder)
 
-    def format(self) -> str:
-        return self._chain.to_format(self.as_dict())
-
-    def _slot_refs(self) -> list[Any]:
-        return []
-
-    # ── Parse ─────────────────────────────────────────────────────────────────
-
     @classmethod
-    def parse(cls, string: str) -> TemplateModel:
-        """Parse *string* and return a typed model instance.
-
-        Raises :class:`~templex.exceptions.ParseError` on mismatch.
-        """
-        m = cls._regex.match(string)
-        if not m:
-            raise ParseError(
-                f"{cls.__name__}: could not parse {string!r}\n"
-                f"  expected pattern: {cls._regex.pattern}"
-            )
-        return cls._build_from_groups(m.groupdict(), string)
-
-    @classmethod
-    def _build_from_groups(cls, groups: dict[str, str], original: str) -> TemplateModel:
-        kwargs: dict[str, Any] = {}
-
-        for field_name, field in cls._fields.items():
-            raw = groups.get(field_name)
-            if raw is None:
-                if field.token.default is not None:
-                    kwargs[field_name] = field.token.default
-                else:
-                    raise ParseError(f"{cls.__name__}: no match for field {field_name!r}")
-            else:
-                kwargs[field_name] = field.token.parse(raw)
-
-        for slot_name, slot in cls._slots.items():
-            prefix = f"{slot_name}__"
-            sub_groups = {
-                key[len(prefix) :]: val
-                for key, val in groups.items()
-                if key.startswith(prefix) and val is not None
-            }
-            raw_slot = groups.get(slot_name)
-            if not sub_groups and raw_slot is None:
-                raise ParseError(f"{cls.__name__}: no match for slot {slot_name!r}")
-            kwargs[slot_name] = slot.model._build_from_groups(sub_groups, original)
-
-        return cls(**kwargs)
-
-    # ── Format ────────────────────────────────────────────────────────────────
-
-    def _to_values(self) -> dict[str, Any]:
-        """Flatten self into the dict expected by :meth:`Chain.to_format`."""
-        values: dict[str, Any] = {}
-        for field_name in self._fields:
-            values[field_name] = getattr(self, field_name)
-        for slot_name in self._slots:
-            values[slot_name] = getattr(self, slot_name)
-        return values
-
-    def __str__(self) -> str:
-        return self._chain.to_format(self._to_values())
-
-    def __repr__(self) -> str:
-        field_parts = [f"{n}={getattr(self, n)!r}" for n in self._fields]
-        slot_parts = [f"{n}={getattr(self, n)!r}" for n in self._slots]
-        return f"{self.__class__.__name__}({', '.join(field_parts + slot_parts)})"
-
-    def __eq__(self, other: object) -> bool:
-        if type(self) is not type(other):
-            return False
-        for attr_name in list(self._fields) + list(self._slots):
-            if getattr(self, attr_name) != getattr(other, attr_name):
-                return False
-        return True
-
-    def __hash__(self) -> int:
-        return NotImplemented  # type: ignore[return-value]
-
-    # ── Flatten ───────────────────────────────────────────────────────────────
-
-    def flatten(self) -> dict[str, Any]:
-        """Return a flat ``dict`` with ``__`` separator for nested slot fields."""
-        result: dict[str, Any] = {}
-        for field_name in self._fields:
-            result[field_name] = getattr(self, field_name)
-        for slot_name, slot in self._slots.items():
-            sub = getattr(self, slot_name)
-            if sub is not None:
-                for sub_field in slot.model._fields:
-                    result[f"{slot_name}__{sub_field}"] = getattr(sub, sub_field)
-                for sub_slot_name in slot.model._slots:
-                    if getattr(sub, sub_slot_name) is not None:
-                        for k, v in sub.flatten().items():
-                            key = f"{slot_name}__{k}"
-                            if key not in result:
-                                result[key] = v
-        return result
-
-    # ── Helpers ───────────────────────────────────────────────────────────────
-
-    @classmethod
-    def _get_field_token(cls, field_name: str) -> Token:
-        if field_name not in cls._fields:
-            raise DefinitionError(f"{cls.__name__} has no field {field_name!r}")
-        return cls._fields[field_name].token
+    def parse(cls, raw: str) -> Self:
+        """Return the parsed object of this model from the given raw string."""
+        raise NotImplementedError

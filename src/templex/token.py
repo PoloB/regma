@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import abc
 import re
-from typing import Any, TypeVar
+from typing import TypeVar
 
-from templex.core import AbstractToken, RegexBuilder
-from templex.exceptions import ParseError
+from templex.core import AbstractToken
+from templex.core import RegexBuilder
+from templex.error import ParseError
 
-T_token = TypeVar("T_token", bound=Any)
+T_token = TypeVar("T_token")
 
 
 class PatternToken(AbstractToken[T_token], abc.ABC):
@@ -71,3 +72,17 @@ class ChoiceToken(PatternToken[str]):
 
     def format(self, value: str) -> str:
         return value
+
+
+class CustomToken(AbstractToken[T_token]):
+    def __init__(self, custom_token: AbstractToken[T_token]) -> None:
+        self._custom_token = custom_token
+
+    def format(self, value: T_token) -> str:
+        return self._custom_token.format(value)
+
+    def to_regex(self, builder: RegexBuilder) -> str:
+        return self._custom_token.to_regex(builder)
+
+    def parse(self, raw: str) -> T_token:
+        return self._custom_token.parse(raw)

@@ -8,7 +8,9 @@ version = "0.1.0"
 description = "Object-based, bidirectional string templating with declarative result types"
 readme = "README.md"
 license = { text = "MIT" }
-authors = [{ name = "templex contributors" }]
+authors = [
+    {name="Paul-Emile Buteau", email="paulemilebuteau@gmail.com"},
+]
 keywords = ["templating", "parsing", "formatting", "paths", "urls"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -44,55 +46,48 @@ Repository = "https://github.com/your-org/templex"
 Issues = "https://github.com/your-org/templex/issues"
 Changelog = "https://github.com/your-org/templex/CHANGELOG.md"
 
-# ── Hatch ─────────────────────────────────────────────────────────────────────
-
 [tool.hatch.build.targets.wheel]
 packages = ["src/templex"]
 
-# ── Pytest ────────────────────────────────────────────────────────────────────
-
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "--tb=short -q"
+pythonpath = "src"
+testpaths = "tests/"
 
-# ── Coverage ──────────────────────────────────────────────────────────────────
-
-[tool.coverage.run]
-source = ["templex"]
-branch = true
-omit = ["templex/__pycache__/*"]
-
-[tool.coverage.report]
-show_missing = true
-skip_covered = false
-fail_under = 90
-exclude_lines = [
+[tool.coverage]
+run.omit = ["tests/*"]
+report.exclude_lines = [
     "pragma: no cover",
     "if TYPE_CHECKING:",
-    "raise NotImplementedError",
-    "@abstractmethod",
+    "@abc.abstractmethod",
 ]
 
-[tool.coverage.xml]
-output = "coverage.xml"
-
-[tool.coverage.html]
-directory = "htmlcov"
-
-# ── Ruff (lint + format) ──────────────────────────────────────────────────────
-
 [tool.ruff]
-target-version = "py310"
-line-length = 100
+target-version = "py311"
+line-length = 89
+lint.select = ["ALL"]
+lint.fixable = [
+    "D202",  # black lines after docstring in functions
+    "I",  # sorting imports
+    "F401",  # unused imports
+    "TC001",  # first party imports not in type checking block
+    "TC002",  # third party imports not in type checking block
+    "TC003",  # builtin party imports not in type checking block
+    "TC004",  # imports used at runtime but in type checking block
+    "TC005",  # empty type checking block
+    "RUF022",
+    "E501",
+    "COM812",
+]
+lint.isort.force-single-line = true
+lint.pydocstyle.convention = "google"
+src = ["src", "tests"]
 
-[tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
-ignore = []
-fixable = ["TC", "E401"]
+[tool.ruff.lint.per-file-ignores]
+"tests/test_*.py" = ["S101"]
+"tests/**/test_*.py" = ["S101"]
 
 # ── Mypy ──────────────────────────────────────────────────────────────────────
 
 [tool.mypy]
-python_version = "3.11"
 strict = true
 ignore_missing_imports = true

@@ -17,13 +17,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from templex import Templatable
-from templex.core import Chain, Separator, TokenReference
-from templex.exceptions import DefinitionError
 from templex.core import AbstractToken
+from templex.core import Chain
+from templex.core import Separator
+from templex.core import TemplateNode
+from templex.core import TokenReference
+from templex.error import DefinitionError
 
 if TYPE_CHECKING:
-    from templex.meta import TemplateModelMeta
+    from templex.model import TemplateModelMeta
 
 
 def parse_template(
@@ -33,7 +35,7 @@ def parse_template(
     template = template_model.__template__
     delimiter = template_model.__delimiter__
     token_re = delimiter.token_re()
-    nodes: list[Templatable] = []
+    nodes: list[TemplateNode] = []
     cursor = 0
     existing_token_references: dict[str, TokenReference] = {}
 
@@ -62,12 +64,12 @@ def parse_template(
                 lookup_obj = getattr(lookup_obj, attr)
             except AttributeError as e:
                 raise DefinitionError(
-                    f"{template_model.__name__}: in reference {m.group()}, could not find attribute {attr!r} in {lookup_obj}"
+                    f"{template_model.__name__}: in reference {m.group()}, could not find attribute {attr!r} in {lookup_obj}",
                 ) from e
 
             if not isinstance(lookup_obj, AbstractToken):
                 raise DefinitionError(
-                    f"{template_model.__name__}: in reference {m.group()}, attribute {attribute_full_name!r} is not an AbstractToken"
+                    f"{template_model.__name__}: in reference {m.group()}, attribute {attribute_full_name!r} is not an AbstractToken",
                 )
             token_reference = TokenReference(attribute_full_name, lookup_obj)
             existing_token_references[attribute_full_name] = token_reference
