@@ -5,23 +5,25 @@ from __future__ import annotations
 import enum
 import re
 from typing import Any
+from typing import ClassVar
+from typing import Generic
+from typing import Self
 from typing import TypeVar
 
-from typing_extensions import Self
 from typing_extensions import dataclass_transform
 from typing_extensions import override
 
+from templex import TemplateNode
 from templex.core import AbstractToken
-from templex.core import BoundToken
 from templex.core import Chain
 from templex.core import RegexBuilder
 from templex.core import T_token
 from templex.error import DefinitionError
 from templex.template_parser import parse_template
-from templex.token import ChoiceToken
-from templex.token import CustomToken
-from templex.token import IntToken
-from templex.token import StrToken
+from templex.token import choice
+from templex.token import custom_token
+from templex.token import integer
+from templex.token import string
 
 
 class Delimiter(enum.Enum):
@@ -58,6 +60,34 @@ class Delimiter(enum.Enum):
         return re.compile(rf"{o}({ident}(?:\.{ident})*){c}")
 
 
+class BoundToken(TemplateNode, Generic[T_token]):
+    """A token bound to a template model through an attribute."""
+
+    def __init__(self, name: str, token: AbstractToken[T_token]) -> None:
+        """Initialize the bound token.
+
+        The name is the name of the attribute the token is bound to.
+
+        For example, in the following template model:
+
+        class ExampleModel(TemplateModel):
+            __template__ = "{test}"
+            test: str = StrToken(".+")
+
+        The name is 'test' and the token is StrToken(".+")
+        """
+        self._name = name
+        self._token = token
+
+    @override
+    def to_chain(self) -> Chain:
+        return Chain([self])
+
+    @override
+    def to_regex(self, builder: RegexBuilder) -> str:
+        return builder.build(self._name, self._token)
+
+
 class TemplateModelMeta(type):
     """Validates and wires up a TemplateModel subclass at definition time.
 
@@ -83,7 +113,7 @@ class TemplateModelMeta(type):
         **kwargs: Any,  # noqa: ANN401
     ) -> TemplateModelMeta:
         """Build the template model internals (tokens -> bound tokens, chain, regex)."""
-        cls = super().__new__(mcs, name, bases, namespace, **kwargs)
+        cls: TemplateModelMeta = super().__new__(mcs, name, bases, namespace, **kwargs)
 
         # Skip the bare TemplateModel base itself
         if name == "TemplateModel":
@@ -153,9 +183,9 @@ class ModelToken(AbstractToken[T_token_model]):
     def to_regex(self, builder: RegexBuilder) -> str:
         return self._model.__chain__.to_regex(builder)
 
-    @override
-    def format(self, value: T_token) -> str:
-        raise NotImplementedError
+    # @override
+    # def format(self, value: T_token) -> str:
+    #     raise NotImplementedError
 
     @override
     def parse(self, raw: str) -> T_token_model:
@@ -166,8 +196,19 @@ class ModelToken(AbstractToken[T_token_model]):
         return getattr(self._model, item)
 
 
+def model(model_cls: type[T_token_model]) -> Any:  # noqa: ANN401
+    """Return a token wrapping an existing template model class."""
+    return ModelToken(model_cls)
+
+
 @dataclass_transform(
-    field_specifiers=(StrToken, IntToken, ChoiceToken, CustomToken, ModelToken),
+    field_specifiers=(
+        string,
+        integer,
+        choice,
+        custom_token,
+        ModelToken,
+    ),
 )
 class TemplateModel(metaclass=TemplateModelMeta):
     r"""Base class for all declarative template models.
@@ -191,6 +232,7 @@ class TemplateModel(metaclass=TemplateModelMeta):
     """
 
     # Populated by metaclass
+    __dataclass_transform__: ClassVar[dict[str, Any]]
     __delimiter__ = Delimiter.CURLY
     __regex_builder__ = RegexBuilder()
     __bound_tokens__: dict[str, BoundToken[Any]]

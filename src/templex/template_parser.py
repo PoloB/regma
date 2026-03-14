@@ -1,7 +1,4 @@
-"""
-templex.template_parser
-~~~~~~~~~~~~~~~~~~~~~~~
-Parses a format-string template into a Chain of Chainable nodes.
+"""Parses a format-string template into a Chain of Chainable nodes.
 
 Syntax (delimiter-agnostic — works for CURLY, ANGLE, SQUARE):
 
@@ -16,16 +13,48 @@ value; the parser itself has no knowledge of which style is in use.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from typing import Any
+
+from typing_extensions import override
 
 from templex.core import AbstractToken
 from templex.core import Chain
+from templex.core import RegexBuilder
 from templex.core import Separator
 from templex.core import TemplateNode
-from templex.core import TokenReference
 from templex.error import DefinitionError
 
 if TYPE_CHECKING:
     from templex.model import TemplateModelMeta
+
+
+class TokenReference(TemplateNode):
+    """A referenced token in a model template.
+
+    This is used in the template parsing.
+    """
+
+    def __init__(
+        self,
+        attribute_name: str,
+        target_token: AbstractToken[Any],
+    ) -> None:
+        """Initialize a TokenReference node."""
+        self.__name = attribute_name
+        self._token = target_token
+
+    @property
+    def target(self) -> AbstractToken[Any]:
+        """Return the token referenced as a target token."""
+        return self._token
+
+    @override
+    def to_regex(self, builder: RegexBuilder) -> str:
+        return builder.build(self.__name, self._token)
+
+    @override
+    def to_chain(self) -> Chain:
+        return Chain([self])
 
 
 def parse_template(
@@ -63,20 +92,25 @@ def parse_template(
             try:
                 lookup_obj = getattr(lookup_obj, attr)
             except AttributeError as e:
-                raise DefinitionError(
-                    f"{template_model.__name__}: in reference {m.group()}, could not find attribute {attr!r} in {lookup_obj}",
-                ) from e
+                msg = (
+                    f"{template_model.__name__}: in reference {m.group()}, "
+                    f"could not find attribute {attr!r} in {lookup_obj}"
+                )
+                raise DefinitionError(msg) from e
 
             if not isinstance(lookup_obj, AbstractToken):
-                raise DefinitionError(
-                    f"{template_model.__name__}: in reference {m.group()}, attribute {attribute_full_name!r} is not an AbstractToken",
+                msg = (
+                    f"{template_model.__name__}: in reference {m.group()}, "
+                    f"attribute {attribute_full_name!r} is not an AbstractToken"
                 )
+                raise DefinitionError(msg)
             token_reference = TokenReference(attribute_full_name, lookup_obj)
             existing_token_references[attribute_full_name] = token_reference
             attribute_full_name += "."
 
         if token_reference is None:
-            raise DefinitionError(f"Invalid attribute {attr_name}")
+            msg = f"Invalid attribute {attr_name}"
+            raise DefinitionError(msg)
 
         nodes.append(token_reference)
         cursor = end

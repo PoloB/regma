@@ -1,10 +1,7 @@
-"""
-templex
-~~~~~~~
-Object-based, bidirectional string templating with declarative result types.
+"""Object-based, bidirectional string templating with declarative result types.
 
-    from templex import TemplateModel, Field, Slot
-    from templex.tokens import StrToken, IntToken, ChoiceToken
+from templex import TemplateModel, Field, Slot
+from templex.tokens import StrToken, IntToken, ChoiceToken
 """
 
 from templex.core import Chain
