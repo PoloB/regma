@@ -188,7 +188,7 @@ class ModelToken(AbstractToken[T_token_model]):
     #     raise NotImplementedError
 
     @override
-    def parse(self, raw: str) -> T_token_model:
+    def extract_value(self, raw: str) -> T_token_model:
         return self._model.parse(raw)
 
     def __getattr__(self, item: str) -> Any:  # noqa: ANN401

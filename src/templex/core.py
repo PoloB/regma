@@ -89,7 +89,7 @@ class AbstractToken(TemplateNode, abc.ABC, Generic[T_token]):
     """Abstract base for all atomic tokens."""
 
     @abc.abstractmethod
-    def parse(self, raw: str) -> T_token:
+    def extract_value(self, raw: str) -> T_token:
         """Return the parsed value from the given string."""
 
     @override

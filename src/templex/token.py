@@ -8,6 +8,7 @@ from typing import Any
 from typing import TypeVar
 from typing import override
 
+from templex import DefinitionError
 from templex.core import AbstractToken
 from templex.core import RegexBuilder
 from templex.error import ParseError
@@ -22,16 +23,21 @@ class PatternToken(AbstractToken[T_token], abc.ABC):
         """Initialize the token."""
         self._pattern = pattern
 
+    @property
+    def pattern(self) -> str:
+        """Return the pattern for this token."""
+        return self._pattern
+
     @override
     def to_regex(self, builder: RegexBuilder) -> str:
-        return self._pattern
+        return self.pattern
 
 
 class StrToken(PatternToken[str]):
     """A string token."""
 
     @override
-    def parse(self, raw: str) -> str:
+    def extract_value(self, raw: str) -> str:
         return raw
 
 
@@ -45,18 +51,38 @@ class IntToken(PatternToken[int]):
 
     def __init__(
         self,
-        min_val: int | None = None,
-        max_val: int | None = None,
+        minimum: int | None = None,
+        maximum: int | None = None,
         padding: int | None = None,
     ) -> None:
         """Initialize the token."""
-        super().__init__(r"\d+")
-        self._min_val = min_val
-        self._max_val = max_val
+        if minimum is not None and maximum is not None and minimum > maximum:
+            msg = f"Minimum value is greater than maximum: {minimum} > {maximum}"
+            raise DefinitionError(msg)
+
+        pattern = r"^\d+$" if padding is None else rf"^\d{{{padding}}}$"
+        super().__init__(pattern)
+        self._min_val = minimum
+        self._max_val = maximum
         self._padding = padding
 
+    @property
+    def min_value(self) -> int | None:
+        """Return the minimum value."""
+        return self._min_val
+
+    @property
+    def max_value(self) -> int | None:
+        """Return the maximum value."""
+        return self._max_val
+
+    @property
+    def padding(self) -> int | None:
+        """Return the padding."""
+        return self._padding
+
     @override
-    def parse(self, raw: str) -> int:
+    def extract_value(self, raw: str) -> int:
         value = int(raw)
         if self._min_val is not None and value < self._min_val:
             msg = f"{value} < min {self._min_val}"
@@ -68,12 +94,12 @@ class IntToken(PatternToken[int]):
 
 
 def integer(
-    min_val: int | None = None,
-    max_val: int | None = None,
+    minimum: int | None = None,
+    maximum: int | None = None,
     padding: int | None = None,
 ) -> Any:  # noqa: ANN401
     """Return an integer token."""
-    return IntToken(min_val, max_val, padding=padding)
+    return IntToken(minimum=minimum, maximum=maximum, padding=padding)
 
 
 class ChoiceToken(PatternToken[str]):
@@ -81,14 +107,11 @@ class ChoiceToken(PatternToken[str]):
 
     def __init__(self, choices: set[str]) -> None:
         """Initialize the token."""
-        self.choices = list(choices)
+        self.choices = choices
         super().__init__("|".join(re.escape(c) for c in self.choices))
 
     @override
-    def parse(self, raw: str) -> str:
-        if raw not in self.choices:
-            msg = f"{raw!r} not in choices {self.choices}"
-            raise ParseError(msg)
+    def extract_value(self, raw: str) -> str:
         return raw
 
 
@@ -109,8 +132,8 @@ class CustomToken(AbstractToken[T_token]):
         return self._custom_token.to_regex(builder)
 
     @override
-    def parse(self, raw: str) -> T_token:
-        return self._custom_token.parse(raw)
+    def extract_value(self, raw: str) -> T_token:
+        return self._custom_token.extract_value(raw)
 
 
 def custom_token(token: AbstractToken[T_token]) -> Any:  # noqa: ANN401
