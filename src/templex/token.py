@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import abc
 import re
+from typing import TYPE_CHECKING
 from typing import Any
 from typing import TypeVar
 from typing import override
 
-from templex import DefinitionError
 from templex.core import AbstractToken
 from templex.core import RegexBuilder
+from templex.error import DefinitionError
 from templex.error import ParseError
+
+if TYPE_CHECKING:
+    from templex.model import TemplateModel
 
 T_token = TypeVar("T_token")
 
@@ -60,7 +64,7 @@ class IntToken(PatternToken[int]):
             msg = f"Minimum value is greater than maximum: {minimum} > {maximum}"
             raise DefinitionError(msg)
 
-        pattern = r"^\d+$" if padding is None else rf"^\d{{{padding}}}$"
+        pattern = r"\d+" if padding is None else rf"\d{{{padding}}}"
         super().__init__(pattern)
         self._min_val = minimum
         self._max_val = maximum
@@ -105,17 +109,18 @@ def integer(
 class ChoiceToken(PatternToken[str]):
     """A choice token."""
 
-    def __init__(self, choices: set[str]) -> None:
+    def __init__(self, choices: list[str]) -> None:
         """Initialize the token."""
         self.choices = choices
-        super().__init__("|".join(re.escape(c) for c in self.choices))
+        pattern = "|".join(re.escape(c) for c in self.choices)
+        super().__init__(rf"(?:{pattern})")
 
     @override
     def extract_value(self, raw: str) -> str:
         return raw
 
 
-def choice(choices: set[str]) -> Any:  # noqa: ANN401
+def choice(choices: list[str]) -> Any:  # noqa: ANN401
     """Return a choice token."""
     return ChoiceToken(choices)
 
@@ -126,6 +131,11 @@ class CustomToken(AbstractToken[T_token]):
     def __init__(self, token: AbstractToken[T_token]) -> None:
         """Initialize the token."""
         self._custom_token = token
+
+    @property
+    def token(self) -> AbstractToken[T_token]:
+        """Return the custom token."""
+        return self._custom_token
 
     @override
     def to_regex(self, builder: RegexBuilder) -> str:
@@ -139,3 +149,36 @@ class CustomToken(AbstractToken[T_token]):
 def custom_token(token: AbstractToken[T_token]) -> Any:  # noqa: ANN401
     """Return a custom token wrapping the given definition."""
     return CustomToken(token)
+
+
+T_token_model = TypeVar("T_token_model", bound="TemplateModel")
+
+
+class ModelToken(AbstractToken[T_token_model]):
+    """A template model wrapped as a token."""
+
+    def __init__(self, model_cls: type[T_token_model]) -> None:
+        """Initialize the model token."""
+        self._model = model_cls
+
+    @property
+    def model(self) -> type[T_token_model]:
+        """Return the model wrapped by this token."""
+        return self._model
+
+    @override
+    def to_regex(self, builder: RegexBuilder) -> str:
+        return self._model.__chain__.to_regex(builder)
+
+    @override
+    def extract_value(self, raw: str) -> T_token_model:
+        return self._model.parse(raw)
+
+    def __getattr__(self, item: str) -> Any:  # noqa: ANN401
+        """Return the attribute of the underlying model class."""
+        return getattr(self._model, item)
+
+
+def model(model_cls: type[T_token_model]) -> Any:  # noqa: ANN401
+    """Return a token wrapping an existing template model class."""
+    return ModelToken(model_cls)

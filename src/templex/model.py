@@ -8,18 +8,18 @@ from typing import Any
 from typing import ClassVar
 from typing import Generic
 from typing import Self
-from typing import TypeVar
+from typing import override
 
 from typing_extensions import dataclass_transform
-from typing_extensions import override
 
+from templex import Separator
 from templex import TemplateNode
 from templex.core import AbstractToken
 from templex.core import Chain
 from templex.core import RegexBuilder
 from templex.core import T_token
 from templex.error import DefinitionError
-from templex.template_parser import parse_template
+from templex.token import ModelToken
 from templex.token import choice
 from templex.token import custom_token
 from templex.token import integer
@@ -28,9 +28,6 @@ from templex.token import string
 
 class Delimiter(enum.Enum):
     """Token delimiter styles for string templates.
-
-    Each variant carries its open/close characters and can compile
-    its own token regex — template_parser.py stays delimiter-agnostic.
 
     Examples:
     CURLY  →  {asset_source.type}/{asset_source}
@@ -56,7 +53,7 @@ class Delimiter(enum.Enum):
         """Compile and return the regex that matches one token placeholder."""
         o = re.escape(self.token_open)
         c = re.escape(self.token_close)
-        ident = r"[A-Za-z_][A-Za-z0-9_]*"
+        ident = rf"[^{o}{c}]*"
         return re.compile(rf"{o}({ident}(?:\.{ident})*){c}")
 
 
@@ -79,6 +76,16 @@ class BoundToken(TemplateNode, Generic[T_token]):
         self._name = name
         self._token = token
 
+    @property
+    def name(self) -> str:
+        """Return the name of the bound token."""
+        return self._name
+
+    @property
+    def token(self) -> AbstractToken[T_token]:
+        """Return the bound token."""
+        return self._token
+
     @override
     def to_chain(self) -> Chain:
         return Chain([self])
@@ -86,6 +93,167 @@ class BoundToken(TemplateNode, Generic[T_token]):
     @override
     def to_regex(self, builder: RegexBuilder) -> str:
         return builder.build(self._name, self._token)
+
+
+class TokenReference(TemplateNode):
+    """A referenced token in a model template.
+
+    This is used in the template parsing.
+    """
+
+    def __init__(
+        self,
+        attribute_name: str,
+        target_token: AbstractToken[Any],
+    ) -> None:
+        """Initialize a TokenReference node."""
+        self.__name = attribute_name
+        self._token = target_token
+
+    @property
+    def attribute_name(self) -> str:
+        """Return the name of the token attribute."""
+        return self.__name
+
+    @property
+    def target(self) -> AbstractToken[Any]:
+        """Return the token referenced as a target token."""
+        return self._token
+
+    @override
+    def to_regex(self, builder: RegexBuilder) -> str:
+        return builder.build(self.__name, self._token)
+
+    @override
+    def to_chain(self) -> Chain:
+        return Chain([self])
+
+
+def _parse_template(
+    template_model: TemplateModelMeta,
+) -> Chain:
+    """Convert a template string into a :class:`~templex.core.Chain`."""
+    template = template_model.__template__
+    delimiter = template_model.__delimiter__
+    token_re = delimiter.token_re()
+    nodes: list[TemplateNode] = []
+    cursor = 0
+    existing_token_references: dict[str, TokenReference] = {}
+
+    for m in token_re.finditer(template):
+        start, end = m.span()
+        attr_name: str = m.group(1)
+
+        attributes = attr_name.split(".")
+
+        if start > cursor:
+            nodes.append(Separator(template[cursor:start]))
+
+        # Find the targeted token
+        token_reference: TokenReference | None = None
+        lookup_obj = template_model
+        attribute_full_name = ""
+        for attr in attributes:
+            if not attr:
+                continue
+
+            attribute_full_name += attr
+            token_reference = existing_token_references.get(attr)
+
+            if token_reference:
+                lookup_obj = getattr(lookup_obj, attr)
+                token_reference = TokenReference(attribute_full_name, lookup_obj)
+                attribute_full_name += "."
+                continue
+
+            try:
+                lookup_obj = getattr(lookup_obj, attr)
+            except AttributeError as e:
+                msg = (
+                    f"{template_model.__name__}: in reference {m.group()}, "
+                    f"could not find attribute {attr!r} in {lookup_obj}"
+                )
+                raise DefinitionError(msg) from e
+
+            if not isinstance(lookup_obj, AbstractToken):
+                msg = (
+                    f"{template_model.__name__}: in reference {m.group()}, "
+                    f"attribute {attribute_full_name!r} is not an AbstractToken"
+                )
+                raise DefinitionError(msg)
+            token_reference = TokenReference(attribute_full_name, lookup_obj)
+            existing_token_references[attribute_full_name] = token_reference
+            attribute_full_name += "."
+
+        if token_reference is None:
+            msg = f"Invalid attribute {attr_name}"
+            raise DefinitionError(msg)
+
+        nodes.append(token_reference)
+        cursor = end
+
+    if cursor < len(template):
+        nodes.append(Separator(template[cursor:]))
+
+    return Chain(nodes)
+
+
+def _validate_template(
+    model_cls: TemplateModelMeta,
+) -> None:
+    """Validates that the template is valid."""
+    # Template shall contain all the element required to build its model references
+
+    def _check_has_all_elements(
+        model_cls_: TemplateModelMeta,
+        references: set[str],
+        parent_bound: str,
+    ) -> None:
+        model_tokens: dict[str, ModelToken[TemplateModel]] = {}
+        other_token_names: set[str] = set()
+
+        for bound_token in model_cls_.__bound_tokens__.values():
+            wrapped_token = bound_token.token
+            if not isinstance(wrapped_token, ModelToken):
+                other_token_names.add(bound_token.name)
+                continue
+            model_tokens[bound_token.name] = wrapped_token
+
+        # Check leaf tokens are used in the template
+        missing_tokens = other_token_names.difference(references)
+        if missing_tokens:
+            # Rebuild the full missing token
+            missing_full_tokens = sorted(
+                f"{parent_bound}.{missing_token}" for missing_token in missing_tokens
+            )
+            msg = (
+                f"All tokens of {parent_bound!r} are not used in "
+                f"{model_cls.__name__} template (missing {missing_full_tokens})"
+            )
+            raise DefinitionError(msg)
+
+        for bound_name, model_token in model_tokens.items():
+            # Get all the references starting with the bound name
+            model_refs = {r for r in references if r.startswith(bound_name)}
+            if bound_name in model_refs:
+                # There is a complete reference, this is ok
+                continue
+
+            sub_references = {r.split(".", maxsplit=1)[1] for r in model_refs}
+            # Check recursively
+            _check_has_all_elements(
+                model_token.model,
+                sub_references,
+                f"{parent_bound}.{bound_name}" if parent_bound else bound_name,
+            )
+
+    ref_tokens = {
+        node.attribute_name
+        for node in model_cls.__chain__.nodes
+        if isinstance(node, TokenReference)
+    }
+
+    _check_has_all_elements(model_cls, ref_tokens, "")
 
 
 class TemplateModelMeta(type):
@@ -119,10 +287,6 @@ class TemplateModelMeta(type):
         if name == "TemplateModel":
             return cls
 
-        if TemplateModel.__name__ not in {b.__name__ for b in bases}:
-            msg = f"{name}: must be subclass of {TemplateModel.__name__}"
-            raise DefinitionError(msg)
-
         # Create bounded token objects
         bound_tokens: dict[str, BoundToken[Any]] = {}
 
@@ -150,55 +314,27 @@ class TemplateModelMeta(type):
             )
             raise DefinitionError(msg)
 
-        chain: Chain = parse_template(cls)
+        chain: Chain = _parse_template(cls)
         cls.__chain__ = chain
+        _validate_template(cls)
 
         # Go through all bases to get the regex builder
         regex_builders = (c.get("__regex_builder__") for c in contents)
-        regex_builder = next(d for d in regex_builders if d is not None)
+        regex_builder_cls = next(d for d in regex_builders if d is not None)
 
-        if not isinstance(regex_builder, RegexBuilder):
+        if not isinstance(regex_builder_cls, type) or not issubclass(
+            regex_builder_cls,
+            RegexBuilder,
+        ):
             msg = (
-                f"{name}: __regex_builder__ must be a {RegexBuilder.__name__} instance, "
-                f"got {type(regex_builder).__name__!r}"
+                f"{name}: __regex_builder__ must be of type {RegexBuilder.__name__}, "
+                f"got {type(regex_builder_cls).__name__!r}"
             )
             raise DefinitionError(msg)
 
-        cls.__regex__ = cls.__chain__.to_regex(regex_builder)
+        cls.__regex__ = cls.__chain__.to_regex(regex_builder_cls())
 
         return cls
-
-
-T_token_model = TypeVar("T_token_model", bound="TemplateModel")
-
-
-class ModelToken(AbstractToken[T_token_model]):
-    """A template model wrapped as a token."""
-
-    def __init__(self, model_cls: type[T_token_model]) -> None:
-        """Initialize the model token."""
-        self._model = model_cls
-
-    @override
-    def to_regex(self, builder: RegexBuilder) -> str:
-        return self._model.__chain__.to_regex(builder)
-
-    # @override
-    # def format(self, value: T_token) -> str:
-    #     raise NotImplementedError
-
-    @override
-    def extract_value(self, raw: str) -> T_token_model:
-        return self._model.parse(raw)
-
-    def __getattr__(self, item: str) -> Any:  # noqa: ANN401
-        """Return the attribute of the underlying model class."""
-        return getattr(self._model, item)
-
-
-def model(model_cls: type[T_token_model]) -> Any:  # noqa: ANN401
-    """Return a token wrapping an existing template model class."""
-    return ModelToken(model_cls)
 
 
 @dataclass_transform(
@@ -234,7 +370,7 @@ class TemplateModel(metaclass=TemplateModelMeta):
     # Populated by metaclass
     __dataclass_transform__: ClassVar[dict[str, Any]]
     __delimiter__ = Delimiter.CURLY
-    __regex_builder__ = RegexBuilder()
+    __regex_builder__: type[RegexBuilder] = RegexBuilder
     __bound_tokens__: dict[str, BoundToken[Any]]
     __template__: str
 
@@ -242,21 +378,28 @@ class TemplateModel(metaclass=TemplateModelMeta):
         """Initialize the template model with given kwargs arguments."""
         fields = list(self.__bound_tokens__)
 
+        if len(args) > len(fields):
+            msg = f"Expected {len(args)} arguments, got {len(fields)}"
+            raise TypeError(msg)
+
+        all_kwargs: dict[str, Any] = {}
+
         for i, value in enumerate(args):
             name = fields[i]
-            kwargs[name] = value
+            all_kwargs[name] = value
+
+        for name, value in kwargs.items():
+            if name in all_kwargs:
+                msg = f"Argument '{name}' provided more than once"
+                raise TypeError(msg)
+            all_kwargs[name] = value
 
         for name in fields:
-            if name in kwargs:
-                setattr(self, name, kwargs[name])
+            if name in all_kwargs:
+                setattr(self, name, all_kwargs[name])
             else:
                 msg = f"Missing required token: '{name}'"
                 raise TypeError(msg)
-
-    @classmethod
-    def construct_regex(cls, builder: RegexBuilder) -> str:
-        """Construct the regex of this module using the given builder."""
-        return cls.__chain__.to_regex(builder)
 
     @classmethod
     def parse(cls, raw: str) -> Self:
