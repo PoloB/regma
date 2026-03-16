@@ -11,6 +11,7 @@ from templex import StrToken
 from templex import TemplateModel
 from templex.core import RegexBuilder
 from templex.model import BoundToken
+from templex.model import TokenReference
 from templex.token import integer
 from templex.token import model
 from templex.token import string
@@ -25,10 +26,7 @@ from templex.token import string
     ],
 )
 def test_delimiter(
-    delimiter: Delimiter,
-    open_token: str,
-    close_token: str,
-    expected_regex: str,
+    delimiter: Delimiter, open_token: str, close_token: str, expected_regex: str
 ) -> None:
     """Delimiter enum behaves as expected."""
     assert isinstance(delimiter.value, tuple)
@@ -59,6 +57,28 @@ def test_bound_token_to_chain() -> None:
     chain = bound_token.to_chain()
     assert isinstance(chain, Chain)
     assert chain.nodes == [bound_token]
+
+
+def test_token_reference_init() -> None:
+    """A token reference shall init successfully."""
+    target_token = StrToken(r"\w+")
+    token_ref = TokenReference("attr", target_token)
+    assert token_ref.attribute_name == "attr"
+    assert token_ref.target is target_token
+
+
+def test_token_reference_to_regex() -> None:
+    """Test the token reference regex construction."""
+    token_ref = TokenReference("foo.bar", StrToken(r"\w+"))
+    regex_builder = RegexBuilder()
+    assert token_ref.to_regex(regex_builder) == r"(?P<foo__bar>\w+)"
+
+
+def test_token_reference_to_chain() -> None:
+    """Test the token reference chain construction."""
+    token_ref = TokenReference("foo.bar", StrToken(r"\w+"))
+    chain = token_ref.to_chain()
+    assert chain.nodes == [token_ref]
 
 
 def test_model_fails_without_template() -> None:
@@ -201,6 +221,7 @@ def test_definition_fails_with_missing_sub_model_token() -> None:
         bar: str = string(r"\w+")
 
     with pytest.raises(DefinitionError):
+
         class SecondModel(TemplateModel):
             __template__ = "{foo}/{bar}/{first.foo}"  # first.bar is missing
             foo: str = string(r"\w+")

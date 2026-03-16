@@ -98,9 +98,7 @@ class IntToken(PatternToken[int]):
 
 
 def integer(
-    minimum: int | None = None,
-    maximum: int | None = None,
-    padding: int | None = None,
+    minimum: int | None = None, maximum: int | None = None, padding: int | None = None
 ) -> Any:  # noqa: ANN401
     """Return an integer token."""
     return IntToken(minimum=minimum, maximum=maximum, padding=padding)

@@ -23,6 +23,7 @@ from templex.token import ModelToken
 from templex.token import choice
 from templex.token import custom_token
 from templex.token import integer
+from templex.token import model
 from templex.token import string
 
 
@@ -101,11 +102,7 @@ class TokenReference(TemplateNode):
     This is used in the template parsing.
     """
 
-    def __init__(
-        self,
-        attribute_name: str,
-        target_token: AbstractToken[Any],
-    ) -> None:
+    def __init__(self, attribute_name: str, target_token: AbstractToken[Any]) -> None:
         """Initialize a TokenReference node."""
         self.__name = attribute_name
         self._token = target_token
@@ -129,9 +126,7 @@ class TokenReference(TemplateNode):
         return Chain([self])
 
 
-def _parse_template(
-    template_model: TemplateModelMeta,
-) -> Chain:
+def _parse_template(template_model: TemplateModelMeta) -> Chain:
     """Convert a template string into a :class:`~templex.core.Chain`."""
     template = template_model.__template__
     delimiter = template_model.__delimiter__
@@ -205,9 +200,7 @@ def _validate_template(
     # Template shall contain all the element required to build its model references
 
     def _check_has_all_elements(
-        model_cls_: TemplateModelMeta,
-        references: set[str],
-        parent_bound: str,
+        model_cls_: TemplateModelMeta, references: set[str], parent_bound: str
     ) -> None:
         model_tokens: dict[str, ModelToken[TemplateModel]] = {}
         other_token_names: set[str] = set()
@@ -323,8 +316,7 @@ class TemplateModelMeta(type):
         regex_builder_cls = next(d for d in regex_builders if d is not None)
 
         if not isinstance(regex_builder_cls, type) or not issubclass(
-            regex_builder_cls,
-            RegexBuilder,
+            regex_builder_cls, RegexBuilder
         ):
             msg = (
                 f"{name}: __regex_builder__ must be of type {RegexBuilder.__name__}, "
@@ -337,15 +329,7 @@ class TemplateModelMeta(type):
         return cls
 
 
-@dataclass_transform(
-    field_specifiers=(
-        string,
-        integer,
-        choice,
-        custom_token,
-        ModelToken,
-    ),
-)
+@dataclass_transform(field_specifiers=(string, integer, choice, custom_token, model))
 class TemplateModel(metaclass=TemplateModelMeta):
     r"""Base class for all declarative template models.
 
