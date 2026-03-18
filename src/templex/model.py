@@ -442,6 +442,16 @@ class TemplateModel(metaclass=TemplateModelMeta):
 
         return True
 
+    def __hash__(self) -> int:
+        """Return hash of model."""
+        return hash(
+            (
+                type(self),
+                *(getattr(self, attr) for attr in self.__fields__),
+                *(getattr(self, attr) for attr in self.__model_fields__),
+            )
+        )
+
     @classmethod
     def fields(cls) -> dict[str, AbstractField[Any]]:
         """Return the fields available in the template model."""
