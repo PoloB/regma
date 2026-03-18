@@ -56,14 +56,14 @@ nav:
   - Home: index.md
   - Guide:
       - guide/quickstart.md
-      - guide/tokens.md
+      - guide/fields.md
       - guide/models.md
       - guide/slots.md
       - guide/string_templates.md
       - guide/delimiters.md
   - API Reference:
       - api/templatemodel.md
-      - api/tokens.md
+      - api/fields.md
       - api/slot.md
       - api/config.md
       - api/exceptions.md

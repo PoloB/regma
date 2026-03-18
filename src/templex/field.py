@@ -1,4 +1,4 @@
-"""Definition of tokens to be used in template models."""
+"""Definition of fields to be used in template models."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any
 from typing import TypeVar
 from typing import override
 
-from templex.core import AbstractToken
+from templex.core import AbstractField
 from templex.core import RegexBuilder
 from templex.error import DefinitionError
 from templex.error import ParseError
@@ -17,19 +17,19 @@ from templex.error import ParseError
 if TYPE_CHECKING:
     from templex.model import TemplateModel
 
-T_token = TypeVar("T_token")
+T_field = TypeVar("T_field")
 
 
-class PatternToken(AbstractToken[T_token], abc.ABC):
-    """Generic token matching a regex."""
+class PatternField(AbstractField[T_field], abc.ABC):
+    """Generic field matching a regex."""
 
     def __init__(self, pattern: str) -> None:
-        """Initialize the token."""
+        """Initialize the field."""
         self._pattern = pattern
 
     @property
     def pattern(self) -> str:
-        """Return the pattern for this token."""
+        """Return the pattern for this field."""
         return self._pattern
 
     @override
@@ -37,8 +37,8 @@ class PatternToken(AbstractToken[T_token], abc.ABC):
         return self.pattern
 
 
-class StrToken(PatternToken[str]):
-    """A string token."""
+class StrField(PatternField[str]):
+    """A string field."""
 
     @override
     def extract_value(self, raw: str) -> str:
@@ -46,12 +46,12 @@ class StrToken(PatternToken[str]):
 
 
 def string(pattern: str) -> Any:  # noqa: ANN401
-    """Return a string token."""
-    return StrToken(pattern)
+    """Return a string field."""
+    return StrField(pattern)
 
 
-class IntToken(PatternToken[int]):
-    """An integer token."""
+class IntField(PatternField[int]):
+    """An integer field."""
 
     def __init__(
         self,
@@ -59,7 +59,7 @@ class IntToken(PatternToken[int]):
         maximum: int | None = None,
         padding: int | None = None,
     ) -> None:
-        """Initialize the token."""
+        """Initialize the field."""
         if minimum is not None and maximum is not None and minimum > maximum:
             msg = f"Minimum value is greater than maximum: {minimum} > {maximum}"
             raise DefinitionError(msg)
@@ -100,15 +100,15 @@ class IntToken(PatternToken[int]):
 def integer(
     minimum: int | None = None, maximum: int | None = None, padding: int | None = None
 ) -> Any:  # noqa: ANN401
-    """Return an integer token."""
-    return IntToken(minimum=minimum, maximum=maximum, padding=padding)
+    """Return an integer field."""
+    return IntField(minimum=minimum, maximum=maximum, padding=padding)
 
 
-class ChoiceToken(PatternToken[str]):
-    """A choice token."""
+class ChoiceField(PatternField[str]):
+    """A choice field."""
 
     def __init__(self, choices: list[str]) -> None:
-        """Initialize the token."""
+        """Initialize the field."""
         self.choices = choices
         pattern = "|".join(re.escape(c) for c in self.choices)
         super().__init__(rf"(?:{pattern})")
@@ -119,49 +119,49 @@ class ChoiceToken(PatternToken[str]):
 
 
 def choice(choices: list[str]) -> Any:  # noqa: ANN401
-    """Return a choice token."""
-    return ChoiceToken(choices)
+    """Return a choice field."""
+    return ChoiceField(choices)
 
 
-class CustomToken(AbstractToken[T_token]):
-    """A custom token wrapping the given definition."""
+class CustomField(AbstractField[T_field]):
+    """A custom field wrapping the given definition."""
 
-    def __init__(self, token: AbstractToken[T_token]) -> None:
-        """Initialize the token."""
-        self._custom_token = token
+    def __init__(self, field: AbstractField[T_field]) -> None:
+        """Initialize the field."""
+        self._custom_field = field
 
     @property
-    def token(self) -> AbstractToken[T_token]:
-        """Return the custom token."""
-        return self._custom_token
+    def field(self) -> AbstractField[T_field]:
+        """Return the custom field."""
+        return self._custom_field
 
     @override
     def to_regex(self, builder: RegexBuilder) -> str:
-        return self._custom_token.to_regex(builder)
+        return self._custom_field.to_regex(builder)
 
     @override
-    def extract_value(self, raw: str) -> T_token:
-        return self._custom_token.extract_value(raw)
+    def extract_value(self, raw: str) -> T_field:
+        return self._custom_field.extract_value(raw)
 
 
-def custom_token(token: AbstractToken[T_token]) -> Any:  # noqa: ANN401
-    """Return a custom token wrapping the given definition."""
-    return CustomToken(token)
+def custom_field(field: AbstractField[T_field]) -> Any:  # noqa: ANN401
+    """Return a custom field wrapping the given definition."""
+    return CustomField(field)
 
 
-T_token_model = TypeVar("T_token_model", bound="TemplateModel")
+T_field_model = TypeVar("T_field_model", bound="TemplateModel")
 
 
-class ModelToken(AbstractToken[T_token_model]):
-    """A template model wrapped as a token."""
+class ModelField(AbstractField[T_field_model]):
+    """A template model wrapped as a field."""
 
-    def __init__(self, model_cls: type[T_token_model]) -> None:
-        """Initialize the model token."""
+    def __init__(self, model_cls: type[T_field_model]) -> None:
+        """Initialize the model field."""
         self._model = model_cls
 
     @property
-    def model(self) -> type[T_token_model]:
-        """Return the model wrapped by this token."""
+    def model(self) -> type[T_field_model]:
+        """Return the model wrapped by this field."""
         return self._model
 
     @override
@@ -169,7 +169,7 @@ class ModelToken(AbstractToken[T_token_model]):
         return self._model.__chain__.to_regex(builder)
 
     @override
-    def extract_value(self, raw: str) -> T_token_model:
+    def extract_value(self, raw: str) -> T_field_model:
         return self._model.parse(raw)
 
     def __getattr__(self, item: str) -> Any:  # noqa: ANN401
@@ -177,6 +177,6 @@ class ModelToken(AbstractToken[T_token_model]):
         return getattr(self._model, item)
 
 
-def model(model_cls: type[T_token_model]) -> Any:  # noqa: ANN401
-    """Return a token wrapping an existing template model class."""
-    return ModelToken(model_cls)
+def model(model_cls: type[T_field_model]) -> Any:  # noqa: ANN401
+    """Return a field wrapping an existing template model class."""
+    return ModelField(model_cls)

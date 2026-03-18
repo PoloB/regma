@@ -10,7 +10,7 @@ class ParseError(TemplexError):
 
 
 class FormatError(TemplexError):
-    """Raised when a value cannot be formatted by a token."""
+    """Raised when a value cannot be formatted by a field."""
 
 
 class DefinitionError(TemplexError):

@@ -15,22 +15,22 @@ class RegexBuilder:
     def __init__(self) -> None:
         """Initialize the regex builder."""
         self._attribute_stack: list[str] = []
-        self._seen_tokens: set[str] = set()
+        self._seen_fields: set[str] = set()
 
     def build(self, attribute_name: str, template_node: TemplateNode) -> str:
-        """Build the regex for the given token name and pattern."""
+        """Build the regex for the given field name and pattern."""
         attribute_name = attribute_name.replace(".", "__")
-        token_name = "__".join([*self._attribute_stack, attribute_name])
-        if token_name in self._seen_tokens:
-            return rf"(?P={token_name})"
+        field_name = "__".join([*self._attribute_stack, attribute_name])
+        if field_name in self._seen_fields:
+            return rf"(?P={field_name})"
 
-        self._seen_tokens.add(token_name)
+        self._seen_fields.add(field_name)
 
         # Build the regex
         self._attribute_stack.append(attribute_name)
         regex = template_node.to_regex(self)
         self._attribute_stack.pop()
-        return rf"(?P<{token_name}>{regex})"
+        return rf"(?P<{field_name}>{regex})"
 
 
 class TemplateNode(abc.ABC):
@@ -82,14 +82,14 @@ class Separator(TemplateNode):
         return Chain([self])
 
 
-T_token = TypeVar("T_token")
+T_value = TypeVar("T_value")
 
 
-class AbstractToken(TemplateNode, abc.ABC, Generic[T_token]):
-    """Abstract base for all atomic tokens."""
+class AbstractField(TemplateNode, abc.ABC, Generic[T_value]):
+    """Abstract base for all atomic fields."""
 
     @abc.abstractmethod
-    def extract_value(self, raw: str) -> T_token:
+    def extract_value(self, raw: str) -> T_value:
         """Return the parsed value from the given string."""
 
     @override

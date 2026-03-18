@@ -9,7 +9,7 @@ a bidirectional string template.
 
 ```python
 from templex import TemplateModel
-from templex.token import choice, string
+from templex.field import choice, string
 
 
 class Asset(TemplateModel):

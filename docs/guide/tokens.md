@@ -17,12 +17,12 @@ All tokens are **immutable**. Use `.configure()` to create a modified copy.
 Matches a string pattern, returns `str`.
 
 ```python
-from templex.tokens import StrToken
+from templex.fields import StrField
 
-CODE = StrToken("code", pattern=r"[a-z][a-z0-9]+")
-NAME = StrToken("name")                              # default: matches [^/]+
-UPPER = StrToken("label", format=str.upper)          # callable formatter
-BRACKETED = StrToken("tag", format="[{}]")           # str.format formatter
+CODE = StrField("code", pattern=r"[a-z][a-z0-9]+")
+NAME = StrField("name")                              # default: matches [^/]+
+UPPER = StrField("label", format=str.upper)          # callable formatter
+BRACKETED = StrField("tag", format="[{}]")           # str.format formatter
 ```
 
 ### IntToken
@@ -31,10 +31,10 @@ Matches digits, returns `int`. Supports range validation and zero-padded
 formatting.
 
 ```python
-from templex.tokens import IntToken
+from templex.fields import IntField
 
-VERSION = IntToken("version", format="{:03d}")             # → "007"
-PAGE    = IntToken("page", min=1, max=999, format="{:03d}")
+VERSION = IntField("version", format="{:03d}")             # → "007"
+PAGE    = IntField("page", min=1, max=999, format="{:03d}")
 ```
 
 ### ChoiceToken
@@ -42,9 +42,9 @@ PAGE    = IntToken("page", min=1, max=999, format="{:03d}")
 Matches one of a fixed set of string values.
 
 ```python
-from templex.tokens import ChoiceToken
+from templex.fields import ChoiceField
 
-DEPT = ChoiceToken("dept", choices=["chr", "prp", "env", "veh"])
+DEPT = ChoiceField("dept", choices=["chr", "prp", "env", "veh"])
 ```
 
 Parsing a value not in `choices` raises `ParseError`.
@@ -55,10 +55,10 @@ Defined entirely by a raw regex pattern. Useful for complex patterns that
 don't fit `StrToken`.
 
 ```python
-from templex.tokens import RegexToken
+from templex.fields import RegexField
 
-SEQUENCE = RegexToken("sequence", pattern=r"SQ\d{3}")
-EPISODE  = RegexToken("episode",  pattern=r"EP\d{4}")
+SEQUENCE = RegexField("sequence", pattern=r"SQ\d{3}")
+EPISODE  = RegexField("episode",  pattern=r"EP\d{4}")
 ```
 
 ---
@@ -69,9 +69,9 @@ EPISODE  = RegexToken("episode",  pattern=r"EP\d{4}")
 specified attributes overridden. The original is never mutated:
 
 ```python
-VERSION = IntToken("version", format="{:03d}")
+VERSION = IntField("version", format="{:03d}")
 
-# Returns a new IntToken — VERSION is unchanged
+# Returns a new IntField — VERSION is unchanged
 SHORT_VERSION = VERSION.configure(format="{:02d}", max=99)
 
 assert VERSION.format(7)       == "007"
@@ -90,7 +90,7 @@ Any token can carry a `default` used when the field is absent during
 formatting:
 
 ```python
-VERSION = IntToken("version", format="{:03d}", default=1)
+VERSION = IntField("version", format="{:03d}", default=1)
 ```
 
 ---
@@ -100,9 +100,9 @@ VERSION = IntToken("version", format="{:03d}", default=1)
 Subclass `Token` and implement `_default_pattern()` and `_parse_value()`:
 
 ```python
-from templex.tokens import Token
+from templex.fields import Field
 
-class ShotToken(Token):
+class ShotField(Field):
     def _default_pattern(self) -> str:
         return r"\d{4}"
 

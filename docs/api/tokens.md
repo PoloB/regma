@@ -1,14 +1,14 @@
-# Tokens
+# Fields
 
-::: templex.tokens.Token
-
----
-
-::: templex.tokens.StrToken
+::: templex.fields.Field
 
 ---
 
-::: templex.tokens.IntToken
+::: templex.fields.StrField
+
+---
+
+::: templex.fields.IntField
 
 ---
 

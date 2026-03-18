@@ -13,10 +13,10 @@ instances — not plain dicts.
 
 ```python
 from templex import TemplateModel, Field, Slot
-from templex.tokens import StrToken, ChoiceToken
+from templex.field import StrField, ChoiceField
 
-ASSET_TYPE = ChoiceToken("type", choices=["chr", "prp", "env", "veh"])
-ASSET_CODE = StrToken("code", pattern=r"[a-z][a-z0-9]+")
+ASSET_TYPE = ChoiceField("type", choices=["chr", "prp", "env", "veh"])
+ASSET_CODE = StrField("code", pattern=r"[a-z][a-z0-9]+")
 
 class AssetResult(TemplateModel):
     type: str = Field(ASSET_TYPE)
@@ -54,9 +54,9 @@ Full documentation at **[your-org.github.io/templex](https://your-org.github.io/
 
 ```python
 from templex import TemplateModel, Field, Slot
-from templex.tokens import StrToken, ChoiceToken
+from templex.fields import StrField, ChoiceField
 
-GROOM = StrToken("groom", pattern=r"[a-z]+")
+GROOM = StrField("groom", pattern=r"[a-z]+")
 
 class GroomPathResult(TemplateModel):
     asset_source = Slot(AssetResult)

@@ -4,16 +4,16 @@ import re
 from typing import override
 
 from templex import TemplateModel
-from templex.core import AbstractToken
+from templex.core import AbstractField
 from templex.core import RegexBuilder
-from templex.token import string
+from templex.field import string
 
 
-class IntChoiceToken(AbstractToken[int]):
-    """An integer choice token."""
+class IntChoiceField(AbstractField[int]):
+    """An integer choice field."""
 
     def __init__(self, choices: list[int]) -> None:
-        """Initialize the integer choice token."""
+        """Initialize the integer choice field."""
         self.choices = choices
 
     @override

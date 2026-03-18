@@ -38,12 +38,12 @@ template = (
 )
 ```
 
-Tokens inside delimiters are resolved against the model's declared `Field`
+Fields inside delimiters are resolved against the model's declared `Field`
 and `Slot` attributes:
 
 | Syntax | Resolves to |
 |---|---|
-| `{name}` | `BoundSlot` if `name` is a `Slot`, otherwise token via `Field` |
+| `{name}` | `BoundSlot` if `name` is a `Slot`, otherwise field via `Field` |
 | `{name.field}` | `BoundField` — `name` must be a `Slot`, `field` must exist on its model |
 | Literal text | `Separator` |
 
@@ -70,7 +70,7 @@ the test suite.
 |---|---|
 | Complex composition from sub-chains | Clear, readable declaration |
 | Programmatic template construction | Human-written templates |
-| IDE auto-complete on token names | Closer to lucidity-style patterns |
+| IDE auto-complete on field names | Closer to lucidity-style patterns |
 
 For most use cases, the string syntax is more readable. The chain syntax is
 more powerful when templates are built dynamically.

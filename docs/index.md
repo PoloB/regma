@@ -23,10 +23,10 @@ result into a **typed model instance**:
 
 ```python
 from templex import TemplateModel, Field, Slot
-from templex.tokens import StrToken, ChoiceToken, IntToken
+from templex.fields import StrField, ChoiceField, IntField
 
-ASSET_TYPE = ChoiceToken("type", choices=["chr", "prp", "env", "veh"])
-ASSET_CODE = StrToken("code", pattern=r"[a-z][a-z0-9]+")
+ASSET_TYPE = ChoiceField("type", choices=["chr", "prp", "env", "veh"])
+ASSET_CODE = StrField("code", pattern=r"[a-z][a-z0-9]+")
 
 class AssetResult(TemplateModel):
     type: str = Field(ASSET_TYPE)
@@ -75,12 +75,12 @@ Requires Python 3.10+, no dependencies.
 ```python
 import templex
 from templex import TemplateModel, Field, Slot, Delimiter
-from templex.tokens import StrToken, ChoiceToken, IntToken
+from templex.fields import StrField, ChoiceField, IntField
 
-# ── Tokens ────────────────────────────────────────────────────────────────────
-ASSET_TYPE = ChoiceToken("type", choices=["chr", "prp", "env", "veh"])
-ASSET_CODE = StrToken("code", pattern=r"[a-z][a-z0-9]+")
-GROOM      = StrToken("groom", pattern=r"[a-z]+")
+# ── Fields ────────────────────────────────────────────────────────────────────
+ASSET_TYPE = ChoiceField("type", choices=["chr", "prp", "env", "veh"])
+ASSET_CODE = StrField("code", pattern=r"[a-z][a-z0-9]+")
+GROOM      = StrField("groom", pattern=r"[a-z]+")
 
 # ── Sub-model ─────────────────────────────────────────────────────────────────
 class AssetResult(TemplateModel):

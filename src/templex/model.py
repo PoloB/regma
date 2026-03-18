@@ -2,33 +2,37 @@
 
 from __future__ import annotations
 
+import collections
 import enum
 import re
 from typing import Any
 from typing import ClassVar
 from typing import Generic
 from typing import Self
+from typing import TypeVar
 from typing import override
 
 from typing_extensions import dataclass_transform
 
+from templex import ParseError
 from templex import Separator
 from templex import TemplateNode
-from templex.core import AbstractToken
+from templex.core import AbstractField
 from templex.core import Chain
 from templex.core import RegexBuilder
-from templex.core import T_token
 from templex.error import DefinitionError
-from templex.token import ModelToken
-from templex.token import choice
-from templex.token import custom_token
-from templex.token import integer
-from templex.token import model
-from templex.token import string
+from templex.field import ModelField
+from templex.field import choice
+from templex.field import custom_field
+from templex.field import integer
+from templex.field import model
+from templex.field import string
+
+T_field = TypeVar("T_field", bound=AbstractField[Any])
 
 
 class Delimiter(enum.Enum):
-    """Token delimiter styles for string templates.
+    """Field delimiter styles for string templates.
 
     Examples:
     CURLY  →  {asset_source.type}/{asset_source}
@@ -42,50 +46,50 @@ class Delimiter(enum.Enum):
 
     @property
     def token_open(self) -> str:
-        """Return the open token of the delimiter."""
+        """Return the open field of the delimiter."""
         return self.value[0]
 
     @property
     def token_close(self) -> str:
-        """Return the close token of the delimiter."""
+        """Return the close field of the delimiter."""
         return self.value[1]
 
     def token_re(self) -> re.Pattern[str]:
-        """Compile and return the regex that matches one token placeholder."""
+        """Compile and return the regex that matches one field placeholder."""
         o = re.escape(self.token_open)
         c = re.escape(self.token_close)
         ident = rf"[^{o}{c}]*"
         return re.compile(rf"{o}({ident}(?:\.{ident})*){c}")
 
 
-class BoundToken(TemplateNode, Generic[T_token]):
-    """A token bound to a template model through an attribute."""
+class BoundField(TemplateNode, Generic[T_field]):
+    """A field bound to a template model through an attribute."""
 
-    def __init__(self, name: str, token: AbstractToken[T_token]) -> None:
-        """Initialize the bound token.
+    def __init__(self, name: str, field: T_field) -> None:
+        """Initialize the bound field.
 
-        The name is the name of the attribute the token is bound to.
+        The name is the name of the attribute the field is bound to.
 
         For example, in the following template model:
 
         class ExampleModel(TemplateModel):
             __template__ = "{test}"
-            test: str = StrToken(".+")
+            test: str = StrField(".+")
 
-        The name is 'test' and the token is StrToken(".+")
+        The name is 'test' and the field is StrField(".+")
         """
         self._name = name
-        self._token = token
+        self._field = field
 
     @property
     def name(self) -> str:
-        """Return the name of the bound token."""
+        """Return the name of the bound field."""
         return self._name
 
     @property
-    def token(self) -> AbstractToken[T_token]:
-        """Return the bound token."""
-        return self._token
+    def field(self) -> T_field:
+        """Return the bound field."""
+        return self._field
 
     @override
     def to_chain(self) -> Chain:
@@ -93,33 +97,33 @@ class BoundToken(TemplateNode, Generic[T_token]):
 
     @override
     def to_regex(self, builder: RegexBuilder) -> str:
-        return builder.build(self._name, self._token)
+        return builder.build(self._name, self._field)
 
 
-class TokenReference(TemplateNode):
-    """A referenced token in a model template.
+class FieldReference(TemplateNode):
+    """A referenced field in a model template.
 
     This is used in the template parsing.
     """
 
-    def __init__(self, attribute_name: str, target_token: AbstractToken[Any]) -> None:
-        """Initialize a TokenReference node."""
+    def __init__(self, attribute_name: str, target_field: AbstractField[Any]) -> None:
+        """Initialize a FieldReference node."""
         self.__name = attribute_name
-        self._token = target_token
+        self._field = target_field
 
     @property
     def attribute_name(self) -> str:
-        """Return the name of the token attribute."""
+        """Return the name of the field attribute."""
         return self.__name
 
     @property
-    def target(self) -> AbstractToken[Any]:
-        """Return the token referenced as a target token."""
-        return self._token
+    def target(self) -> AbstractField[Any]:
+        """Return the field referenced as a target field."""
+        return self._field
 
     @override
     def to_regex(self, builder: RegexBuilder) -> str:
-        return builder.build(self.__name, self._token)
+        return builder.build(self.__name, self._field)
 
     @override
     def to_chain(self) -> Chain:
@@ -133,7 +137,7 @@ def _parse_template(template_model: TemplateModelMeta) -> Chain:
     token_re = delimiter.token_re()
     nodes: list[TemplateNode] = []
     cursor = 0
-    existing_token_references: dict[str, TokenReference] = {}
+    existing_field_references: dict[str, FieldReference] = {}
 
     for m in token_re.finditer(template):
         start, end = m.span()
@@ -144,8 +148,8 @@ def _parse_template(template_model: TemplateModelMeta) -> Chain:
         if start > cursor:
             nodes.append(Separator(template[cursor:start]))
 
-        # Find the targeted token
-        token_reference: TokenReference | None = None
+        # Find the targeted field
+        field_reference: FieldReference | None = None
         lookup_obj = template_model
         attribute_full_name = ""
         for attr in attributes:
@@ -153,11 +157,11 @@ def _parse_template(template_model: TemplateModelMeta) -> Chain:
                 continue
 
             attribute_full_name += attr
-            token_reference = existing_token_references.get(attr)
+            field_reference = existing_field_references.get(attr)
 
-            if token_reference:
+            if field_reference:
                 lookup_obj = getattr(lookup_obj, attr)
-                token_reference = TokenReference(attribute_full_name, lookup_obj)
+                field_reference = FieldReference(attribute_full_name, lookup_obj)
                 attribute_full_name += "."
                 continue
 
@@ -170,21 +174,21 @@ def _parse_template(template_model: TemplateModelMeta) -> Chain:
                 )
                 raise DefinitionError(msg) from e
 
-            if not isinstance(lookup_obj, AbstractToken):
+            if not isinstance(lookup_obj, AbstractField):
                 msg = (
                     f"{template_model.__name__}: in reference {m.group()}, "
-                    f"attribute {attribute_full_name!r} is not an AbstractToken"
+                    f"attribute {attribute_full_name!r} is not an AbstractField"
                 )
                 raise DefinitionError(msg)
-            token_reference = TokenReference(attribute_full_name, lookup_obj)
-            existing_token_references[attribute_full_name] = token_reference
+            field_reference = FieldReference(attribute_full_name, lookup_obj)
+            existing_field_references[attribute_full_name] = field_reference
             attribute_full_name += "."
 
-        if token_reference is None:
+        if field_reference is None:
             msg = f"Invalid attribute {attr_name}"
             raise DefinitionError(msg)
 
-        nodes.append(token_reference)
+        nodes.append(field_reference)
         cursor = end
 
     if cursor < len(template):
@@ -193,39 +197,27 @@ def _parse_template(template_model: TemplateModelMeta) -> Chain:
     return Chain(nodes)
 
 
-def _validate_template(
-    model_cls: TemplateModelMeta,
-) -> None:
+def _validate_template(model_cls: TemplateModelMeta) -> None:
     """Validates that the template is valid."""
     # Template shall contain all the element required to build its model references
 
     def _check_has_all_elements(
         model_cls_: TemplateModelMeta, references: set[str], parent_bound: str
     ) -> None:
-        model_tokens: dict[str, ModelToken[TemplateModel]] = {}
-        other_token_names: set[str] = set()
-
-        for bound_token in model_cls_.__bound_tokens__.values():
-            wrapped_token = bound_token.token
-            if not isinstance(wrapped_token, ModelToken):
-                other_token_names.add(bound_token.name)
-                continue
-            model_tokens[bound_token.name] = wrapped_token
-
-        # Check leaf tokens are used in the template
-        missing_tokens = other_token_names.difference(references)
-        if missing_tokens:
-            # Rebuild the full missing token
-            missing_full_tokens = sorted(
-                f"{parent_bound}.{missing_token}" for missing_token in missing_tokens
+        # Check leaf fields are used in the template
+        missing_fields = set(model_cls_.__fields__).difference(references)
+        if missing_fields:
+            # Rebuild the full missing field
+            missing_full_fields = sorted(
+                f"{parent_bound}.{missing_field}" for missing_field in missing_fields
             )
             msg = (
-                f"All tokens of {parent_bound!r} are not used in "
-                f"{model_cls.__name__} template (missing {missing_full_tokens})"
+                f"All fields of {parent_bound!r} are not used in "
+                f"{model_cls.__name__} template (missing {missing_full_fields})"
             )
             raise DefinitionError(msg)
 
-        for bound_name, model_token in model_tokens.items():
+        for bound_name, model_field in model_cls_.__model_fields__.items():
             # Get all the references starting with the bound name
             model_refs = {r for r in references if r.startswith(bound_name)}
             if bound_name in model_refs:
@@ -235,18 +227,50 @@ def _validate_template(
             sub_references = {r.split(".", maxsplit=1)[1] for r in model_refs}
             # Check recursively
             _check_has_all_elements(
-                model_token.model,
+                model_field.field.model,
                 sub_references,
                 f"{parent_bound}.{bound_name}" if parent_bound else bound_name,
             )
 
-    ref_tokens = {
+    ref_fields = {
         node.attribute_name
         for node in model_cls.__chain__.nodes
-        if isinstance(node, TokenReference)
+        if isinstance(node, FieldReference)
     }
 
-    _check_has_all_elements(model_cls, ref_tokens, "")
+    _check_has_all_elements(model_cls, ref_fields, "")
+
+
+T_model = TypeVar("T_model", bound="TemplateModel")
+
+
+def _from_flat_dict(model_cls: type[T_model], data: dict[str, Any]) -> T_model:
+    """Return a model from the given flattened dictionary data.
+
+    The input dict is assumed to be as the regex of the model would return it.
+    """
+    inst_kwargs: dict[str, Any] = {}
+    data_by_model_field: dict[str, dict[str, Any]] = collections.defaultdict(dict)
+
+    for key, value in data.items():
+        if key in model_cls.__model_fields__:  # skipped, we have the sub attribute
+            continue
+
+        field_split = key.split("__", maxsplit=1)
+        attr = field_split[0]
+
+        # this is a direct field
+        if len(field_split) == 1:
+            inst_kwargs[attr] = model_cls.__fields__[attr].field.extract_value(value)
+        else:
+            data_by_model_field[attr][field_split[1]] = value
+
+    for field_name, field_data in data_by_model_field.items():
+        sub_model_cls = model_cls.__model_fields__[field_name].field.model
+        sub_model = _from_flat_dict(sub_model_cls, field_data)
+        inst_kwargs[field_name] = sub_model
+
+    return model_cls(**inst_kwargs)
 
 
 class TemplateModelMeta(type):
@@ -260,7 +284,8 @@ class TemplateModelMeta(type):
     4. Validates sub-field accesses (``slot.field``) against the sub-model.
     """
 
-    __bound_tokens__: dict[str, BoundToken[Any]] = {}  # noqa: RUF012
+    __fields__: dict[str, BoundField[AbstractField[Any]]]
+    __model_fields__: dict[str, BoundField[ModelField[TemplateModel]]]
     __template__: str
     __delimiter__: Delimiter
     __chain__: Chain
@@ -273,21 +298,36 @@ class TemplateModelMeta(type):
         namespace: dict[str, Any],
         **kwargs: Any,  # noqa: ANN401
     ) -> TemplateModelMeta:
-        """Build the template model internals (tokens -> bound tokens, chain, regex)."""
+        """Build the template model internals (fields -> bound fields, chain, regex)."""
         cls: TemplateModelMeta = super().__new__(mcs, name, bases, namespace, **kwargs)
 
         # Skip the bare TemplateModel base itself
         if name == "TemplateModel":
             return cls
 
-        # Create bounded token objects
-        bound_tokens: dict[str, BoundToken[Any]] = {}
+        # Create bounded field objects
+        bound_fields: dict[str, BoundField[Any]] = {}
+        model_fields: dict[str, BoundField[ModelField[TemplateModel]]] = {}
 
         for attr, value in namespace.items():
-            if isinstance(value, AbstractToken):
-                bound_tokens[attr] = BoundToken(attr, value)
+            if not isinstance(value, AbstractField):
+                continue
 
-        cls.__bound_tokens__ = bound_tokens
+            if attr.endswith("_"):
+                msg = (
+                    f"{name}: field attribute {attr!r} cannot ends with underscore "
+                    f"(reserved for regex construction)"
+                )
+                raise DefinitionError(msg)
+
+            # Separate value fields from model fields
+            if isinstance(value, ModelField):
+                model_fields[attr] = BoundField(attr, value)
+            else:
+                bound_fields[attr] = BoundField(attr, value)
+
+        cls.__fields__ = bound_fields
+        cls.__model_fields__ = model_fields
 
         # Validate template
         raw_template: Any = namespace.get("__template__")
@@ -329,15 +369,15 @@ class TemplateModelMeta(type):
         return cls
 
 
-@dataclass_transform(field_specifiers=(string, integer, choice, custom_token, model))
+@dataclass_transform(field_specifiers=(string, integer, choice, custom_field, model))
 class TemplateModel(metaclass=TemplateModelMeta):
     r"""Base class for all declarative template models.
 
     Subclass to declare a typed, bidirectional string template:
 
     class AssetResult(TemplateModel):
-        type: str = StrToken("[a-zA-Z]+")
-        code: str = StrToken("\w+")
+        type: str = string("[a-zA-Z]+")
+        code: str = string("\w+")
         __template__ = "{asset_type}_{code}"
 
     Parse:
@@ -355,12 +395,13 @@ class TemplateModel(metaclass=TemplateModelMeta):
     __dataclass_transform__: ClassVar[dict[str, Any]]
     __delimiter__ = Delimiter.CURLY
     __regex_builder__: type[RegexBuilder] = RegexBuilder
-    __bound_tokens__: dict[str, BoundToken[Any]]
+    __fields__: dict[str, BoundField[AbstractField[Any]]]
+    __model_fields__: dict[str, BoundField[ModelField[TemplateModel]]]
     __template__: str
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
         """Initialize the template model with given kwargs arguments."""
-        fields = list(self.__bound_tokens__)
+        fields = list(self.fields())
 
         if len(args) > len(fields):
             msg = f"Expected {len(args)} arguments, got {len(fields)}"
@@ -382,10 +423,37 @@ class TemplateModel(metaclass=TemplateModelMeta):
             if name in all_kwargs:
                 setattr(self, name, all_kwargs[name])
             else:
-                msg = f"Missing required token: '{name}'"
+                msg = f"Missing required field: '{name}'"
                 raise TypeError(msg)
+
+    def __eq__(self, other: object) -> bool:
+        """Return true if two models are equal (have the same values)."""
+        if not isinstance(other, type(self)):
+            return NotImplemented
+        # All fields should be equals
+        # Start with value fields to quicly eliminate two different objects
+        for field_name in self.__fields__:
+            if getattr(self, field_name) != getattr(other, field_name):
+                return False
+
+        for field_name in self.__model_fields__:
+            if getattr(self, field_name) != getattr(other, field_name):
+                return False
+
+        return True
+
+    @classmethod
+    def fields(cls) -> dict[str, AbstractField[Any]]:
+        """Return the fields available in the template model."""
+        return {name: bt.field for name, bt in cls.__fields__.items()} | {
+            name: bt.field for name, bt in cls.__model_fields__.items()
+        }
 
     @classmethod
     def parse(cls, raw: str) -> Self:
         """Return the parsed object of this model from the given raw string."""
-        raise NotImplementedError
+        r = re.match(cls.__regex__, raw)
+        if not r:
+            msg = f"Could not parse {raw!r} from {cls.__regex__!r}"
+            raise ParseError(msg)
+        return _from_flat_dict(cls, r.groupdict())

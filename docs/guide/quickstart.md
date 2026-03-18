@@ -5,17 +5,17 @@ This guide walks through templex's core concepts in 5 minutes.
 
 ## 1. Declare a model
 
-Subclass `TemplateModel`, declare tokens, and write the `template`:
+Subclass `TemplateModel`, declare fields, and write the `template`:
 
 ```python
 from templex import TemplateModel
-from templex import token
+from templex import field
 
 class Asset(TemplateModel):
-    type: str = token.choice({'chr', 'prp'})
-    code: str = token.string(r"\w+")
+    type: str = field.choice({'chr', 'prp'})
+    code: str = field.string(r"\w+")
 
-    # Declare the tempalte using the declared tokens
+    # Declare the tempalte using the declared fields
     template = "{type}_{code}"
 ```
 
@@ -33,17 +33,17 @@ Parse and format are always **symmetric**: `str(Model.parse(s)) == s`.
 
 ## 3. Nest models
 
-A `TemplateModel` can be embedded inside another via `token.model`:
+A `TemplateModel` can be embedded inside another via `field.model`:
 
 ```python
 from templex import TemplateModel
-from templex import token
+from templex import field
 
 
 class GroomPath(TemplateModel):
     asset_source: Asset
     asset_target: Asset
-    groom: str = token.string(r"\w+")
+    groom: str = field.string(r"\w+")
 
     template = "/root/assets/{asset_source.type}/{asset_source}/modeling/GB_{asset_source}_{groom}_{asset_target}"
 ```
