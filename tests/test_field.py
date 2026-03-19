@@ -2,7 +2,6 @@
 
 import pytest
 
-from templex import Chain
 from templex import ChoiceField
 from templex import DefinitionError
 from templex import IntField
@@ -31,14 +30,6 @@ def test_str_field_regex() -> None:
     assert StrField(".+").to_regex(engine) == ".+"
 
 
-def test_str_field_to_chain() -> None:
-    """StrField to chain shall contain only itself."""
-    field = StrField(".+")
-    chain = field.to_chain()
-    assert isinstance(chain, Chain)
-    assert chain.nodes == [field]
-
-
 def test_str_field_extract_value() -> None:
     """Parsing of value shall return the given value."""
     assert StrField("").extract_value("anything") == "anything"
@@ -64,14 +55,6 @@ def test_int_field_regex() -> None:
     """Regex returned by IntField shall be the same as initialized."""
     engine = BuiltinRegexEngine()
     assert IntField().to_regex(engine) == r"\d+"
-
-
-def test_int_field_to_chain() -> None:
-    """IntField to chain shall contain only itself."""
-    field = IntField()
-    chain = field.to_chain()
-    assert isinstance(chain, Chain)
-    assert chain.nodes == [field]
 
 
 def test_int_field_minimum_greater_than_maximum() -> None:
@@ -129,14 +112,6 @@ def test_choice_field_regex() -> None:
     assert ChoiceField(["test", "test1"]).to_regex(engine) == r"(?:test|test1)"
 
 
-def test_choice_field_to_chain() -> None:
-    """ChoiceField to chain shall contain only itself."""
-    field = ChoiceField(["test", "test1"])
-    chain = field.to_chain()
-    assert isinstance(chain, Chain)
-    assert chain.nodes == [field]
-
-
 def test_choice_field_extract_value() -> None:
     """Choice field always return the same value on extraction."""
     assert ChoiceField(["test", "test1"]).extract_value("other") == "other"
@@ -162,14 +137,6 @@ def test_custom_field_regex() -> None:
     engine = BuiltinRegexEngine()
     field = IntChoiceField([0, 1])
     assert CustomField(field).to_regex(engine) == field.to_regex(engine)
-
-
-def test_custom_field_to_chain() -> None:
-    """CustomField to chain shall contain only itself."""
-    field = CustomField(IntChoiceField([0, 1]))
-    chain = field.to_chain()
-    assert isinstance(chain, Chain)
-    assert chain.nodes == [field]
 
 
 def test_custom_field_extract_value() -> None:
@@ -198,15 +165,6 @@ def test_model_field_regex() -> None:
     engine = BuiltinRegexEngine()
     model_cls = SimpleTestModel
     assert ModelField(model_cls).to_regex(engine) == model_cls.__regex__
-
-
-def test_model_field_to_chain() -> None:
-    """CustomField to chain shall contain only itself."""
-    model_cls = SimpleTestModel
-    field = ModelField(model_cls)
-    chain = field.to_chain()
-    assert isinstance(chain, Chain)
-    assert chain.nodes == [field]
 
 
 def test_model_field_extract_value() -> None:

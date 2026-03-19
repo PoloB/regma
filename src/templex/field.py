@@ -44,6 +44,10 @@ class StrField(PatternField[str]):
     def extract_value(self, raw: str) -> str:
         return raw
 
+    @override
+    def format_value(self, value: str) -> str:
+        return value
+
 
 def string(pattern: str) -> Any:  # noqa: ANN401
     """Return a string field."""
@@ -96,6 +100,12 @@ class IntField(PatternField[int]):
             raise ParseError(msg)
         return value
 
+    @override
+    def format_value(self, value: int) -> str:
+        if self._padding is None:
+            return str(value)
+        return str(value).zfill(self._padding)
+
 
 def integer(
     minimum: int | None = None, maximum: int | None = None, padding: int | None = None
@@ -116,6 +126,10 @@ class ChoiceField(PatternField[str]):
     @override
     def extract_value(self, raw: str) -> str:
         return raw
+
+    @override
+    def format_value(self, value: str) -> str:
+        return value
 
 
 def choice(choices: list[str]) -> Any:  # noqa: ANN401
@@ -142,6 +156,10 @@ class CustomField(AbstractField[T_field]):
     @override
     def extract_value(self, raw: str) -> T_field:
         return self._custom_field.extract_value(raw)
+
+    @override
+    def format_value(self, value: T_field) -> str:
+        return self._custom_field.format_value(value)
 
 
 def custom_field(field: AbstractField[T_field]) -> Any:  # noqa: ANN401
@@ -171,6 +189,10 @@ class ModelField(AbstractField[T_field_model]):
     @override
     def extract_value(self, raw: str) -> T_field_model:
         return self._model.parse(raw)
+
+    @override
+    def format_value(self, value: T_field_model) -> str:
+        return value.format()
 
     def __getattr__(self, item: str) -> Any:  # noqa: ANN401
         """Return the attribute of the underlying model class."""

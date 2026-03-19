@@ -17,9 +17,9 @@ from typing_extensions import dataclass_transform
 
 from templex import ParseError
 from templex import Separator
-from templex import TemplateNode
 from templex.core import AbstractField
 from templex.core import Chain
+from templex.core import FormatableNode
 from templex.engine import AbstractRegexEngine
 from templex.engine import BuiltinRegexEngine
 from templex.error import DefinitionError
@@ -64,7 +64,7 @@ class Delimiter(enum.Enum):
         return re.compile(rf"{o}({ident}(?:\.{ident})*){c}")
 
 
-class BoundField(TemplateNode, Generic[T_field]):
+class BoundField(FormatableNode, Generic[T_field]):
     """A field bound to a template model through an attribute."""
 
     def __init__(self, name: str, field: T_field) -> None:
@@ -101,8 +101,12 @@ class BoundField(TemplateNode, Generic[T_field]):
     def to_regex(self, engine: AbstractRegexEngine) -> str:
         return engine.build(self._name, self._field)
 
+    @override
+    def format(self, model_inst: TemplateModel) -> str:
+        return self._field.format_value(getattr(model_inst, self._name))
 
-class FieldReference(TemplateNode):
+
+class FieldReference(FormatableNode):
     """A referenced field in a model template.
 
     This is used in the template parsing.
@@ -131,13 +135,21 @@ class FieldReference(TemplateNode):
     def to_chain(self) -> Chain:
         return Chain([self])
 
+    @override
+    def format(self, model: TemplateModel) -> str:
+        value = model
+        for attr in self.__name.split("."):
+            value = getattr(value, attr)
+
+        return self._field.format_value(value)
+
 
 def _parse_template(template_model: TemplateModelMeta) -> Chain:
     """Convert a template string into a :class:`~templex.core.Chain`."""
     template = template_model.__template__
     delimiter = template_model.__delimiter__
     token_re = delimiter.token_re()
-    nodes: list[TemplateNode] = []
+    nodes: list[FormatableNode] = []
     cursor = 0
     existing_field_references: dict[str, FieldReference] = {}
 
@@ -372,12 +384,12 @@ class TemplateModel(metaclass=TemplateModelMeta):
         str(result)   # "chr_toto"
     """
 
-    # Populated by metaclass
     __dataclass_transform__: ClassVar[dict[str, Any]]
+    __chain__: Chain
     __delimiter__ = Delimiter.CURLY
-    __regex_engine__: type[AbstractRegexEngine] = BuiltinRegexEngine
     __fields__: dict[str, BoundField[AbstractField[Any]]]
     __model_fields__: dict[str, BoundField[ModelField[TemplateModel]]]
+    __regex_engine__: type[AbstractRegexEngine] = BuiltinRegexEngine
     __template__: str
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
@@ -478,3 +490,7 @@ class TemplateModel(metaclass=TemplateModelMeta):
             msg = f"Could not parse {raw!r} from {cls.__regex__!r}"
             raise ParseError(msg)
         return cls.from_flat_dict(r.groupdict())
+
+    def format(self) -> str:
+        """Return the formatted string of this model."""
+        return self.__chain__.format(self)

@@ -5,6 +5,7 @@ from typing import override
 
 from templex import TemplateModel
 from templex.core import AbstractField
+from templex.core import T_value
 from templex.engine import AbstractRegexEngine
 from templex.field import integer
 from templex.field import model
@@ -26,6 +27,10 @@ class IntChoiceField(AbstractField[int]):
     def to_regex(self, engine: AbstractRegexEngine) -> str:
         pattern = "|".join(re.escape(str(c)) for c in self.choices)
         return rf"(?:{pattern})"
+
+    @override
+    def format_value(self, value: T_value) -> str:
+        return str(value)
 
 
 class SimpleTestModel(TemplateModel):
