@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import collections
+import contextlib
 import enum
 import re
 from typing import Any
@@ -19,7 +20,8 @@ from templex import Separator
 from templex import TemplateNode
 from templex.core import AbstractField
 from templex.core import Chain
-from templex.core import RegexBuilder
+from templex.engine import AbstractRegexEngine
+from templex.engine import BuiltinRegexEngine
 from templex.error import DefinitionError
 from templex.field import ModelField
 from templex.field import choice
@@ -96,8 +98,8 @@ class BoundField(TemplateNode, Generic[T_field]):
         return Chain([self])
 
     @override
-    def to_regex(self, builder: RegexBuilder) -> str:
-        return builder.build(self._name, self._field)
+    def to_regex(self, engine: AbstractRegexEngine) -> str:
+        return engine.build(self._name, self._field)
 
 
 class FieldReference(TemplateNode):
@@ -122,8 +124,8 @@ class FieldReference(TemplateNode):
         return self._field
 
     @override
-    def to_regex(self, builder: RegexBuilder) -> str:
-        return builder.build(self.__name, self._field)
+    def to_regex(self, engine: AbstractRegexEngine) -> str:
+        return engine.build(self.__name, self._field)
 
     @override
     def to_chain(self) -> Chain:
@@ -244,35 +246,6 @@ def _validate_template(model_cls: TemplateModelMeta) -> None:
 T_model = TypeVar("T_model", bound="TemplateModel")
 
 
-def _from_flat_dict(model_cls: type[T_model], data: dict[str, Any]) -> T_model:
-    """Return a model from the given flattened dictionary data.
-
-    The input dict is assumed to be as the regex of the model would return it.
-    """
-    inst_kwargs: dict[str, Any] = {}
-    data_by_model_field: dict[str, dict[str, Any]] = collections.defaultdict(dict)
-
-    for key, value in data.items():
-        if key in model_cls.__model_fields__:  # skipped, we have the sub attribute
-            continue
-
-        field_split = key.split("__", maxsplit=1)
-        attr = field_split[0]
-
-        # this is a direct field
-        if len(field_split) == 1:
-            inst_kwargs[attr] = model_cls.__fields__[attr].field.extract_value(value)
-        else:
-            data_by_model_field[attr][field_split[1]] = value
-
-    for field_name, field_data in data_by_model_field.items():
-        sub_model_cls = model_cls.__model_fields__[field_name].field.model
-        sub_model = _from_flat_dict(sub_model_cls, field_data)
-        inst_kwargs[field_name] = sub_model
-
-    return model_cls(**inst_kwargs)
-
-
 class TemplateModelMeta(type):
     """Validates and wires up a TemplateModel subclass at definition time.
 
@@ -320,6 +293,13 @@ class TemplateModelMeta(type):
                 )
                 raise DefinitionError(msg)
 
+            if "__" in attr:
+                msg = (
+                    f"{name}: field attribute {attr!r} cannot contains double "
+                    f"underscores (reserved for regex construction)"
+                )
+                raise DefinitionError(msg)
+
             # Separate value fields from model fields
             if isinstance(value, ModelField):
                 model_fields[attr] = BoundField(attr, value)
@@ -351,20 +331,21 @@ class TemplateModelMeta(type):
         cls.__chain__ = chain
         _validate_template(cls)
 
-        # Go through all bases to get the regex builder
-        regex_builders = (c.get("__regex_builder__") for c in contents)
-        regex_builder_cls = next(d for d in regex_builders if d is not None)
+        # Go through all bases to get the regex engine
+        regex_engines = (c.get("__regex_engine__") for c in contents)
+        regex_engine_cls = next(d for d in regex_engines if d is not None)
 
-        if not isinstance(regex_builder_cls, type) or not issubclass(
-            regex_builder_cls, RegexBuilder
+        if not isinstance(regex_engine_cls, type) or not issubclass(
+            regex_engine_cls, AbstractRegexEngine
         ):
             msg = (
-                f"{name}: __regex_builder__ must be of type {RegexBuilder.__name__}, "
-                f"got {type(regex_builder_cls).__name__!r}"
+                f"{name}: __regex_engine__ must be of type "
+                f"{AbstractRegexEngine.__name__}, "
+                f"got {type(regex_engine_cls).__name__!r}"
             )
             raise DefinitionError(msg)
 
-        cls.__regex__ = cls.__chain__.to_regex(regex_builder_cls())
+        cls.__regex__ = cls.__chain__.to_regex(regex_engine_cls())
 
         return cls
 
@@ -394,7 +375,7 @@ class TemplateModel(metaclass=TemplateModelMeta):
     # Populated by metaclass
     __dataclass_transform__: ClassVar[dict[str, Any]]
     __delimiter__ = Delimiter.CURLY
-    __regex_builder__: type[RegexBuilder] = RegexBuilder
+    __regex_engine__: type[AbstractRegexEngine] = BuiltinRegexEngine
     __fields__: dict[str, BoundField[AbstractField[Any]]]
     __model_fields__: dict[str, BoundField[ModelField[TemplateModel]]]
     __template__: str
@@ -460,10 +441,40 @@ class TemplateModel(metaclass=TemplateModelMeta):
         }
 
     @classmethod
+    def from_flat_dict(cls, data: dict[str, Any]) -> Self:
+        """Return a model from the given flattened dictionary data.
+
+        The input dict is assumed to be as the regex of the model would return it.
+        """
+        inst_kwargs: dict[str, Any] = {}
+        data_by_model_field: dict[str, dict[str, Any]] = collections.defaultdict(dict)
+
+        for key, value in data.items():
+            if key in cls.__model_fields__:  # skipped, we have the sub attribute
+                continue
+
+            field_split = key.split("__", maxsplit=1)
+            attr = field_split[0]
+
+            # this is a direct field
+            if len(field_split) == 1:
+                with contextlib.suppress(KeyError):
+                    inst_kwargs[attr] = cls.__fields__[attr].field.extract_value(value)
+            else:
+                data_by_model_field[attr][field_split[1]] = value
+
+        for field_name, field_data in data_by_model_field.items():
+            sub_model_cls = cls.__model_fields__[field_name].field.model
+            sub_model = sub_model_cls.from_flat_dict(field_data)
+            inst_kwargs[field_name] = sub_model
+
+        return cls(**inst_kwargs)
+
+    @classmethod
     def parse(cls, raw: str) -> Self:
         """Return the parsed object of this model from the given raw string."""
         r = re.match(cls.__regex__, raw)
         if not r:
             msg = f"Could not parse {raw!r} from {cls.__regex__!r}"
             raise ParseError(msg)
-        return _from_flat_dict(cls, r.groupdict())
+        return cls.from_flat_dict(r.groupdict())

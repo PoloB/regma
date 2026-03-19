@@ -1,24 +1,8 @@
 """Tests the core module of templex."""
 
 from templex import Chain
-from templex.core import RegexBuilder
 from templex.core import Separator
-
-
-def test_regex_builder_init() -> None:
-    """RegexBuilder shall initialize with no arguments."""
-    RegexBuilder()
-
-
-def test_build_on_attribute() -> None:
-    """Building a template node with an attribute shall give the expected value."""
-    separator = Separator("test")
-    regex_builder = RegexBuilder()
-    assert regex_builder.build("attr", separator) == r"(?P<attr>test)"
-    # Building with the same attribute again gives the exact pattern match
-    assert regex_builder.build("attr", separator) == r"(?P=attr)"
-    # Building the same node with a different attribute name gives a new pattern
-    assert regex_builder.build("attr_other", separator) == r"(?P<attr_other>test)"
+from templex.engine import BuiltinRegexEngine
 
 
 def test_chain_init() -> None:
@@ -32,7 +16,7 @@ def test_chain_init() -> None:
 def test_chain_regex() -> None:
     """Chain shall return expected regex."""
     chain = Chain([Separator("test1"), Separator("test2")])
-    regex_builder = RegexBuilder()
+    regex_builder = BuiltinRegexEngine()
     assert chain.to_regex(regex_builder) == r"test1test2"
 
 
@@ -51,7 +35,7 @@ def test_separator_init() -> None:
 def test_separator_regex() -> None:
     """Separator shall return expected regex."""
     separator = Separator("test")
-    assert separator.to_regex(RegexBuilder()) == "test"
+    assert separator.to_regex(BuiltinRegexEngine()) == "test"
 
 
 def test_separator_to_chain() -> None:

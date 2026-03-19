@@ -10,11 +10,11 @@ from typing import TypeVar
 from typing import override
 
 from templex.core import AbstractField
-from templex.core import RegexBuilder
 from templex.error import DefinitionError
 from templex.error import ParseError
 
 if TYPE_CHECKING:
+    from templex.engine import AbstractRegexEngine
     from templex.model import TemplateModel
 
 T_field = TypeVar("T_field")
@@ -33,7 +33,7 @@ class PatternField(AbstractField[T_field], abc.ABC):
         return self._pattern
 
     @override
-    def to_regex(self, builder: RegexBuilder) -> str:
+    def to_regex(self, engine: AbstractRegexEngine) -> str:
         return self.pattern
 
 
@@ -136,8 +136,8 @@ class CustomField(AbstractField[T_field]):
         return self._custom_field
 
     @override
-    def to_regex(self, builder: RegexBuilder) -> str:
-        return self._custom_field.to_regex(builder)
+    def to_regex(self, engine: AbstractRegexEngine) -> str:
+        return self._custom_field.to_regex(engine)
 
     @override
     def extract_value(self, raw: str) -> T_field:
@@ -165,8 +165,8 @@ class ModelField(AbstractField[T_field_model]):
         return self._model
 
     @override
-    def to_regex(self, builder: RegexBuilder) -> str:
-        return self._model.__chain__.to_regex(builder)
+    def to_regex(self, engine: AbstractRegexEngine) -> str:
+        return self._model.__chain__.to_regex(engine)
 
     @override
     def extract_value(self, raw: str) -> T_field_model:

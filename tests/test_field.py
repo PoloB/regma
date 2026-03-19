@@ -7,7 +7,7 @@ from templex import ChoiceField
 from templex import DefinitionError
 from templex import IntField
 from templex import ParseError
-from templex.core import RegexBuilder
+from templex.engine import BuiltinRegexEngine
 from templex.field import CustomField
 from templex.field import ModelField
 from templex.field import StrField
@@ -27,8 +27,8 @@ def test_str_field_pattern_value() -> None:
 
 def test_str_field_regex() -> None:
     """Regex returned by StrField shall be the same as initialized."""
-    builder = RegexBuilder()
-    assert StrField(".+").to_regex(builder) == ".+"
+    engine = BuiltinRegexEngine()
+    assert StrField(".+").to_regex(engine) == ".+"
 
 
 def test_str_field_to_chain() -> None:
@@ -62,8 +62,8 @@ def test_int_field_default_init() -> None:
 
 def test_int_field_regex() -> None:
     """Regex returned by IntField shall be the same as initialized."""
-    builder = RegexBuilder()
-    assert IntField().to_regex(builder) == r"\d+"
+    engine = BuiltinRegexEngine()
+    assert IntField().to_regex(engine) == r"\d+"
 
 
 def test_int_field_to_chain() -> None:
@@ -125,8 +125,8 @@ def test_choice_field_init() -> None:
 
 def test_choice_field_regex() -> None:
     """Regex returned by ChoiceField shall be the same as initialized."""
-    builder = RegexBuilder()
-    assert ChoiceField(["test", "test1"]).to_regex(builder) == r"(?:test|test1)"
+    engine = BuiltinRegexEngine()
+    assert ChoiceField(["test", "test1"]).to_regex(engine) == r"(?:test|test1)"
 
 
 def test_choice_field_to_chain() -> None:
@@ -159,9 +159,9 @@ def test_custom_field_init() -> None:
 
 def test_custom_field_regex() -> None:
     """Regex returned by CustomField is the same regex as the field itself."""
-    builder = RegexBuilder()
+    engine = BuiltinRegexEngine()
     field = IntChoiceField([0, 1])
-    assert CustomField(field).to_regex(builder) == field.to_regex(builder)
+    assert CustomField(field).to_regex(engine) == field.to_regex(engine)
 
 
 def test_custom_field_to_chain() -> None:
@@ -195,9 +195,9 @@ def test_model_field_init() -> None:
 
 def test_model_field_regex() -> None:
     """Regex returned by ModelField is the same regex as the model itself."""
-    builder = RegexBuilder()
+    engine = BuiltinRegexEngine()
     model_cls = SimpleTestModel
-    assert ModelField(model_cls).to_regex(builder) == model_cls.__regex__
+    assert ModelField(model_cls).to_regex(engine) == model_cls.__regex__
 
 
 def test_model_field_to_chain() -> None:
