@@ -4,144 +4,31 @@ from __future__ import annotations
 
 import collections
 import contextlib
-import enum
 import re
+import typing
 from typing import Any
 from typing import ClassVar
-from typing import Generic
 from typing import Self
 from typing import TypeVar
-from typing import override
 
 from typing_extensions import dataclass_transform
 
-from templex import ParseError
-from templex import Separator
 from templex.core import AbstractField
+from templex.core import BoundField
 from templex.core import Chain
+from templex.core import Delimiter
+from templex.core import FieldReference
 from templex.core import FormatableNode
+from templex.core import Separator
 from templex.engine import AbstractRegexEngine
 from templex.engine import BuiltinRegexEngine
 from templex.error import DefinitionError
+from templex.error import ParseError
 from templex.field import ModelField
 from templex.field import choice
 from templex.field import custom_field
 from templex.field import integer
-from templex.field import model
 from templex.field import string
-
-T_field = TypeVar("T_field", bound=AbstractField[Any])
-
-
-class Delimiter(enum.Enum):
-    """Field delimiter styles for string templates.
-
-    Examples:
-    CURLY  →  {asset_source.type}/{asset_source}
-    ANGLE  →  <asset_source.type>/<asset_source>
-    SQUARE →  [asset_source.type]/[asset_source]
-    """
-
-    CURLY = ("{", "}")
-    ANGLE = ("<", ">")
-    SQUARE = ("[", "]")
-
-    @property
-    def token_open(self) -> str:
-        """Return the open field of the delimiter."""
-        return self.value[0]
-
-    @property
-    def token_close(self) -> str:
-        """Return the close field of the delimiter."""
-        return self.value[1]
-
-    def token_re(self) -> re.Pattern[str]:
-        """Compile and return the regex that matches one field placeholder."""
-        o = re.escape(self.token_open)
-        c = re.escape(self.token_close)
-        ident = rf"[^{o}{c}]*"
-        return re.compile(rf"{o}({ident}(?:\.{ident})*){c}")
-
-
-class BoundField(FormatableNode, Generic[T_field]):
-    """A field bound to a template model through an attribute."""
-
-    def __init__(self, name: str, field: T_field) -> None:
-        """Initialize the bound field.
-
-        The name is the name of the attribute the field is bound to.
-
-        For example, in the following template model:
-
-        class ExampleModel(TemplateModel):
-            __template__ = "{test}"
-            test: str = StrField(".+")
-
-        The name is 'test' and the field is StrField(".+")
-        """
-        self._name = name
-        self._field = field
-
-    @property
-    def name(self) -> str:
-        """Return the name of the bound field."""
-        return self._name
-
-    @property
-    def field(self) -> T_field:
-        """Return the bound field."""
-        return self._field
-
-    @override
-    def to_chain(self) -> Chain:
-        return Chain([self])
-
-    @override
-    def to_regex(self, engine: AbstractRegexEngine) -> str:
-        return engine.build(self._name, self._field)
-
-    @override
-    def format(self, model_inst: TemplateModel) -> str:
-        return self._field.format_value(getattr(model_inst, self._name))
-
-
-class FieldReference(FormatableNode):
-    """A referenced field in a model template.
-
-    This is used in the template parsing.
-    """
-
-    def __init__(self, attribute_name: str, target_field: AbstractField[Any]) -> None:
-        """Initialize a FieldReference node."""
-        self.__name = attribute_name
-        self._field = target_field
-
-    @property
-    def attribute_name(self) -> str:
-        """Return the name of the field attribute."""
-        return self.__name
-
-    @property
-    def target(self) -> AbstractField[Any]:
-        """Return the field referenced as a target field."""
-        return self._field
-
-    @override
-    def to_regex(self, engine: AbstractRegexEngine) -> str:
-        return engine.build(self.__name, self._field)
-
-    @override
-    def to_chain(self) -> Chain:
-        return Chain([self])
-
-    @override
-    def format(self, model: TemplateModel) -> str:
-        value = model
-        for attr in self.__name.split("."):
-            value = getattr(value, attr)
-
-        return self._field.format_value(value)
 
 
 def _parse_template(template_model: TemplateModelMeta) -> Chain:
@@ -211,8 +98,26 @@ def _parse_template(template_model: TemplateModelMeta) -> Chain:
     return Chain(nodes)
 
 
-def _validate_template(model_cls: TemplateModelMeta) -> None:
-    """Validates that the template is valid."""
+def _validate_bound_field_names(model_cls: TemplateModelMeta) -> None:
+    """Validate all fields have a valid name."""
+    for attr in (*model_cls.__model_fields__, *model_cls.__fields__):
+        if attr.endswith("_"):
+            msg = (
+                f"{model_cls.__name__}: field attribute {attr!r} cannot ends with "
+                f"underscore (reserved for regex construction)"
+            )
+            raise DefinitionError(msg)
+
+        if "__" in attr:
+            msg = (
+                f"{model_cls.__name__}: field attribute {attr!r} cannot contains "
+                f"double underscores (reserved for regex construction)"
+            )
+            raise DefinitionError(msg)
+
+
+def _validate_field_references(model_cls: TemplateModelMeta) -> None:
+    """Validate the model has all its fields in __template__."""
     # Template shall contain all the element required to build its model references
 
     def _check_has_all_elements(
@@ -294,32 +199,26 @@ class TemplateModelMeta(type):
         bound_fields: dict[str, BoundField[Any]] = {}
         model_fields: dict[str, BoundField[ModelField[TemplateModel]]] = {}
 
-        for attr, value in namespace.items():
-            if not isinstance(value, AbstractField):
+        # First evaluate the model field references by checking annotations
+        for attr, hint in typing.get_type_hints(cls).items():
+            if not isinstance(hint, type) or not issubclass(hint, TemplateModel):
                 continue
 
-            if attr.endswith("_"):
-                msg = (
-                    f"{name}: field attribute {attr!r} cannot ends with underscore "
-                    f"(reserved for regex construction)"
-                )
-                raise DefinitionError(msg)
+            model_field = ModelField(hint)
+            setattr(cls, attr, model_field)
+            model_fields[attr] = BoundField(attr, model_field)
 
-            if "__" in attr:
-                msg = (
-                    f"{name}: field attribute {attr!r} cannot contains double "
-                    f"underscores (reserved for regex construction)"
-                )
-                raise DefinitionError(msg)
+        # Check for other fields
+        for attr, value in namespace.items():
+            if not isinstance(value, AbstractField) or attr in model_fields:
+                continue
 
             # Separate value fields from model fields
-            if isinstance(value, ModelField):
-                model_fields[attr] = BoundField(attr, value)
-            else:
-                bound_fields[attr] = BoundField(attr, value)
+            bound_fields[attr] = BoundField(attr, value)
 
         cls.__fields__ = bound_fields
         cls.__model_fields__ = model_fields
+        _validate_bound_field_names(cls)
 
         # Validate template
         raw_template: Any = namespace.get("__template__")
@@ -341,7 +240,7 @@ class TemplateModelMeta(type):
 
         chain: Chain = _parse_template(cls)
         cls.__chain__ = chain
-        _validate_template(cls)
+        _validate_field_references(cls)
 
         # Go through all bases to get the regex engine
         regex_engines = (c.get("__regex_engine__") for c in contents)
@@ -362,7 +261,7 @@ class TemplateModelMeta(type):
         return cls
 
 
-@dataclass_transform(field_specifiers=(string, integer, choice, custom_field, model))
+@dataclass_transform(field_specifiers=(string, integer, choice, custom_field))
 class TemplateModel(metaclass=TemplateModelMeta):
     r"""Base class for all declarative template models.
 
@@ -444,6 +343,10 @@ class TemplateModel(metaclass=TemplateModelMeta):
                 *(getattr(self, attr) for attr in self.__model_fields__),
             )
         )
+
+    def __str__(self) -> str:
+        """Return formatted representation of model."""
+        return self.format()
 
     @classmethod
     def fields(cls) -> dict[str, AbstractField[Any]]:

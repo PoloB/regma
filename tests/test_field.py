@@ -2,19 +2,19 @@
 
 import pytest
 
-from templex import ChoiceField
 from templex import DefinitionError
-from templex import IntField
 from templex import ParseError
+from templex import choice
+from templex import custom_field
+from templex import integer
+from templex import reference
+from templex import string
 from templex.engine import BuiltinRegexEngine
+from templex.field import ChoiceField
 from templex.field import CustomField
+from templex.field import IntField
 from templex.field import ModelField
 from templex.field import StrField
-from templex.field import choice
-from templex.field import custom_field
-from templex.field import integer
-from templex.field import model
-from templex.field import string
 from tests.conftest import IntChoiceField
 from tests.conftest import SimpleTestModel
 
@@ -177,6 +177,6 @@ def test_model_field_extract_value() -> None:
 def test_model_field_descriptor() -> None:
     """Model field descriptor shall return an CustomField."""
     model_cls = SimpleTestModel
-    descriptor = model(model_cls)
+    descriptor = reference(model_cls)
     assert isinstance(descriptor, ModelField)
     assert descriptor.model is model_cls

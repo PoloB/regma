@@ -4,85 +4,14 @@ import re
 
 import pytest
 
-from templex import Chain
 from templex import DefinitionError
-from templex import Delimiter
 from templex import ParseError
-from templex import StrField
 from templex import TemplateModel
-from templex.engine import BuiltinRegexEngine
 from templex.field import integer
-from templex.field import model
+from templex.field import reference
 from templex.field import string
-from templex.model import BoundField
-from templex.model import FieldReference
 from tests.conftest import ComplexModel
 from tests.conftest import FooBarModel
-
-
-@pytest.mark.parametrize(
-    ("delimiter", "open_token", "close_token", "expected_regex"),
-    [
-        (Delimiter.CURLY, "{", "}", r"\{([^\{\}]*(?:\.[^\{\}]*)*)\}"),
-        (Delimiter.ANGLE, "<", ">", r"<([^<>]*(?:\.[^<>]*)*)>"),
-        (Delimiter.SQUARE, "[", "]", r"\[([^\[\]]*(?:\.[^\[\]]*)*)\]"),
-    ],
-)
-def test_delimiter(
-    delimiter: Delimiter, open_token: str, close_token: str, expected_regex: str
-) -> None:
-    """Delimiter enum behaves as expected."""
-    assert isinstance(delimiter.value, tuple)
-    assert delimiter.token_open == open_token
-    assert delimiter.token_close == close_token
-    regex = delimiter.token_re()
-    assert isinstance(regex, re.Pattern)
-    assert regex.pattern == expected_regex
-
-
-def test_bound_field_init() -> None:
-    """Bound field init behaves as expected."""
-    bound_field = BoundField("attr", StrField(r"\w+"))
-    assert bound_field.name == "attr"
-
-
-def test_bound_field_regex() -> None:
-    """Bound field regex behaves as expected."""
-    bound_field = BoundField("attr", StrField(r"\w+"))
-    regex_engine = BuiltinRegexEngine()
-    assert bound_field.to_regex(regex_engine) == r"(?P<attr>\w+)"
-    # Calling it again with the same regex engine shall reuse
-    assert bound_field.to_regex(regex_engine) == r"(?P=attr)"
-
-
-def test_bound_field_to_chain() -> None:
-    """Bound field to_chain behaves as expected."""
-    bound_field = BoundField("attr", StrField(r"\w+"))
-    chain = bound_field.to_chain()
-    assert isinstance(chain, Chain)
-    assert chain.nodes == [bound_field]
-
-
-def test_field_reference_init() -> None:
-    """A field reference shall init successfully."""
-    target_field = StrField(r"\w+")
-    field_ref = FieldReference("attr", target_field)
-    assert field_ref.attribute_name == "attr"
-    assert field_ref.target is target_field
-
-
-def test_field_reference_to_regex() -> None:
-    """Test the field reference regex construction."""
-    field_ref = FieldReference("foo.bar", StrField(r"\w+"))
-    regex_builder = BuiltinRegexEngine()
-    assert field_ref.to_regex(regex_builder) == r"(?P<foo__bar>\w+)"
-
-
-def test_field_reference_to_chain() -> None:
-    """Test the field reference chain construction."""
-    field_ref = FieldReference("foo.bar", StrField(r"\w+"))
-    chain = field_ref.to_chain()
-    assert chain.nodes == [field_ref]
 
 
 def test_model_fails_without_template() -> None:
@@ -177,7 +106,7 @@ def test_model_can_reference_other_models_through_model_field() -> None:
         __template__ = "{foo}/{bar}/{first}/{first.foo}_{foo}_{bar}_{first.bar}_{first}"
         foo: str = string(r"\w+")
         bar: str = string(r"\w+")
-        first: FirstModel = model(FirstModel)
+        first: FirstModel = reference(FirstModel)
 
     assert len(SecondModel.__fields__) == 2  # noqa: PLR2004
     assert len(SecondModel.__model_fields__) == 1
@@ -264,7 +193,7 @@ def test_definition_fails_with_missing_sub_model_field() -> None:
             __template__ = "{foo}/{bar}/{first.foo}"  # first.bar is missing
             foo: str = string(r"\w+")
             bar: str = string(r"\w+")
-            first: FirstModel = model(FirstModel)
+            first: FirstModel = reference(FirstModel)
 
 
 def test_model_is_instantiated_correctly() -> None:

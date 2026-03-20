@@ -8,7 +8,7 @@ from templex.core import AbstractField
 from templex.core import T_value
 from templex.engine import AbstractRegexEngine
 from templex.field import integer
-from templex.field import model
+from templex.field import reference
 from templex.field import string
 
 
@@ -54,4 +54,4 @@ class ComplexModel(TemplateModel):
     __template__ = "/root/{foo_bar}{foo}_{bar}"
     foo: str = string(r"\w+")
     bar: int = integer()
-    foo_bar: FooBarModel = model(FooBarModel)
+    foo_bar: FooBarModel

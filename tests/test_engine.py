@@ -1,6 +1,6 @@
 """Tests the engine module of templex."""
 
-from templex import Separator
+from templex.core import Separator
 from templex.engine import BuiltinRegexEngine
 
 

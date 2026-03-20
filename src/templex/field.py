@@ -199,6 +199,6 @@ class ModelField(AbstractField[T_field_model]):
         return getattr(self._model, item)
 
 
-def model(model_cls: type[T_field_model]) -> Any:  # noqa: ANN401
+def reference(model_cls: type[T_field_model]) -> Any:  # noqa: ANN401
     """Return a field wrapping an existing template model class."""
     return ModelField(model_cls)
