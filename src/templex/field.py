@@ -180,10 +180,16 @@ class ChoiceField(PatternField[str]):
 
     @override
     def extract_value(self, raw: str) -> str:
+        if raw not in self.choices:
+            msg = f"{raw} is not a valid choice."
+            raise ParseError(msg)
         return raw
 
     @override
     def format_value(self, value: str) -> str:
+        if value not in self.choices:
+            msg = f"{value} is not a valid choice."
+            raise FormatError(msg)
         return value
 
 

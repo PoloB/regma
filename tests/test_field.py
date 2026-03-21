@@ -16,6 +16,7 @@ from templex.field import CustomField
 from templex.field import IntField
 from templex.field import ModelField
 from templex.field import StrField
+from tests.conftest import FooBarModel
 from tests.conftest import IntChoiceField
 from tests.conftest import SimpleTestModel
 
@@ -50,6 +51,7 @@ def test_int_field_default_init() -> None:
     assert int_field.min_value is None
     assert int_field.max_value is None
     assert int_field.padding is None
+    assert int_field.padding_mode == IntField.PaddingMode.STRICT
 
 
 def test_int_field_regex() -> None:
@@ -78,7 +80,7 @@ def test_int_field_extract_value() -> None:
     assert IntField(padding=4).extract_value("1234") == 1234  # noqa: PLR2004
     assert IntField(minimum=1).extract_value("12") == 12  # noqa: PLR2004
     assert IntField(maximum=10).extract_value("9") == 9  # noqa: PLR2004
-    assert IntField(padding=1).extract_value("-1") == -1  # noqa: PLR2004
+    assert IntField(padding=1).extract_value("-1") == -1
 
 
 def test_int_field_extract_value_fails_when_no_int() -> None:
@@ -122,10 +124,10 @@ def test_int_field_padding_mode_non_strict_extract_success() -> None:
 def test_int_field_format_value() -> None:
     """Format of value shall follow padding."""
     assert IntField().format_value(12345) == "12345"
-    assert IntField(padding=4).format_value(1234) == "1234"  # noqa: PLR2004
-    assert IntField(minimum=1).format_value(12) == "12"  # noqa: PLR2004
-    assert IntField(maximum=10).format_value(9) == "9"  # noqa: PLR2004
-    assert IntField(padding=1).format_value(-2) == "-2"  # noqa: PLR2004
+    assert IntField(padding=4).format_value(1234) == "1234"
+    assert IntField(minimum=1).format_value(12) == "12"
+    assert IntField(maximum=10).format_value(9) == "9"
+    assert IntField(padding=1).format_value(-2) == "-2"
 
 
 def test_int_field_format_value_fails_when_no_int() -> None:
@@ -156,10 +158,10 @@ def test_int_field_padding_mode_non_strict_format_success() -> None:
     """Formatting a value with a padding but not strict shall succeed."""
     mode = IntField.PaddingMode.NON_STRICT
     assert (
-        IntField(padding=2, padding_mode=mode).format_value(123) == "123"  # noqa: PLR2004
+        IntField(padding=2, padding_mode=mode).format_value(123) == "123"
     )
     assert (
-        IntField(padding=2, padding_mode=mode).format_value(-123) == "-123"  # noqa: PLR2004
+        IntField(padding=2, padding_mode=mode).format_value(-123) == "-123"
     )
 
 
@@ -188,7 +190,24 @@ def test_choice_field_regex() -> None:
 
 def test_choice_field_extract_value() -> None:
     """Choice field always return the same value on extraction."""
-    assert ChoiceField(["test", "test1"]).extract_value("other") == "other"
+    assert ChoiceField(["test", "test1"]).extract_value("test") == "test"
+
+
+def test_choice_field_extract_fails_if_not_in_choice() -> None:
+    """Choice field always return the same value on extraction."""
+    with pytest.raises(ParseError):
+        ChoiceField(["test", "test1"]).extract_value("other")
+
+
+def test_choice_field_format_value() -> None:
+    """Choice field is formatting value as expected."""
+    assert ChoiceField(["test", "test1"]).format_value("test") == "test"
+
+
+def test_choice_field_format_fails_if_not_in_choice() -> None:
+    """Formatting field fails if the value is not in choices."""
+    with pytest.raises(FormatError):
+        ChoiceField(["test", "test1"]).format_value("other")
 
 
 def test_choice_field_descriptor() -> None:
@@ -249,9 +268,34 @@ def test_model_field_regex() -> None:
 
 def test_model_field_extract_value() -> None:
     """Model field always return the model parsed value."""
-    model_cls = SimpleTestModel
+    model_cls = FooBarModel
     field = ModelField(model_cls)
-    assert field.extract_value("foo") == model_cls.parse("foo")
+    assert field.extract_value("foo_1") == model_cls.parse("foo_1")
+
+
+def test_model_field_extract_fails_if_model_fails() -> None:
+    """PArsing shall fail if the value is not compatible with model template."""
+    model_cls = FooBarModel
+    field = ModelField(model_cls)
+    with pytest.raises(ParseError):
+        assert field.extract_value("foo")
+
+
+def test_model_field_format_value() -> None:
+    """Model field always return the model formatted value."""
+    model_cls = FooBarModel
+    field = ModelField(model_cls)
+    model_inst = FooBarModel("foo", 1)
+    assert field.format_value(model_inst) == model_inst.format()
+
+
+def test_model_field_format_fails_if_model_fails() -> None:
+    """PArsing shall fail if the value is not compatible with model template."""
+    model_cls = FooBarModel
+    field = ModelField(model_cls)
+    with pytest.raises(ParseError):
+        assert field.extract_value("foo")
+
 
 
 def test_model_field_descriptor() -> None:

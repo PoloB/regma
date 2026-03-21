@@ -8,7 +8,6 @@ from templex.core import AbstractField
 from templex.core import T_value
 from templex.engine import AbstractRegexEngine
 from templex.field import integer
-from templex.field import reference
 from templex.field import string
 
 
