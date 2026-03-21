@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import abc
+import enum
 import re
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import TypeVar
 from typing import override
 
+from templex import FormatError
 from templex.core import AbstractField
 from templex.error import DefinitionError
 from templex.error import ParseError
@@ -57,19 +59,31 @@ def string(pattern: str) -> Any:  # noqa: ANN401
 class IntField(PatternField[int]):
     """An integer field."""
 
+    class PaddingMode(enum.Enum):
+        """An enum representing the padding mode."""
+
+        STRICT = 0
+        NON_STRICT = 1
+
     def __init__(
         self,
         minimum: int | None = None,
         maximum: int | None = None,
         padding: int | None = None,
+        padding_mode: PaddingMode = PaddingMode.STRICT,
     ) -> None:
         """Initialize the field."""
         if minimum is not None and maximum is not None and minimum > maximum:
             msg = f"Minimum value is greater than maximum: {minimum} > {maximum}"
             raise DefinitionError(msg)
 
-        pattern = r"\d+" if padding is None else rf"\d{{{padding}}}"
+        pattern = (
+            rf"\d{{{padding}}}"
+            if padding is not None and padding_mode == self.PaddingMode.STRICT
+            else r"\d+"
+        )
         super().__init__(pattern)
+        self._padding_mode = padding_mode
         self._min_val = minimum
         self._max_val = maximum
         self._padding = padding
@@ -89,22 +103,63 @@ class IntField(PatternField[int]):
         """Return the padding."""
         return self._padding
 
-    @override
-    def extract_value(self, raw: str) -> int:
-        value = int(raw)
+    @property
+    def padding_mode(self) -> PaddingMode:
+        """Return the padding mode of the field."""
+        return self._padding_mode
+
+    def _check_min_max(
+        self, value: int, exception_cls: type[FormatError | ParseError]
+    ) -> None:
+        # Check min and max
         if self._min_val is not None and value < self._min_val:
             msg = f"{value} < min {self._min_val}"
-            raise ParseError(msg)
+            raise exception_cls(msg)
         if self._max_val is not None and value > self._max_val:
             msg = f"{value} > max {self._max_val}"
+            raise exception_cls(msg)
+
+    @override
+    def extract_value(self, raw: str) -> int:
+        try:
+            value = int(raw)
+        except ValueError as e:
+            msg = f"{raw} is not an integer."
+            raise ParseError(msg) from e
+
+        # Check the padding, handling minus number
+        if (
+            self._padding is not None
+            and self._padding_mode == self.PaddingMode.STRICT
+            and len(raw) > self._padding + (1 if value < 0 else 0)
+        ):
+            msg = f"{value} has not a padding of {self._padding}"
             raise ParseError(msg)
+
+        self._check_min_max(value, ParseError)
         return value
 
     @override
     def format_value(self, value: int) -> str:
-        if self._padding is None:
-            return str(value)
-        return str(value).zfill(self._padding)
+        if not isinstance(value, int):
+            msg = f"{value} is not an integer."
+            raise FormatError(msg)
+
+        self._check_min_max(value, FormatError)
+
+        if (
+            self._padding is not None
+            and self._padding_mode == self.PaddingMode.STRICT
+            and len(str(abs(value))) > self._padding
+        ):
+            msg = f"{value} has not a padding of {self._padding}"
+            raise FormatError(msg)
+
+        value_str = str(value)
+        if self._padding is not None and len(value_str) <= self._padding:
+            return str(value).zfill(self._padding)
+
+        return str(value)
 
 
 def integer(
