@@ -20,6 +20,7 @@ from templex.core import Delimiter
 from templex.core import FieldReference
 from templex.core import FormatableNode
 from templex.core import Separator
+from templex.core import Strictness
 from templex.engine import AbstractRegexEngine
 from templex.engine import BuiltinRegexEngine
 from templex.error import DefinitionError
@@ -356,7 +357,9 @@ class TemplateModel(metaclass=TemplateModelMeta):
         }
 
     @classmethod
-    def from_flat_dict(cls, data: dict[str, Any]) -> Self:
+    def from_flat_dict(
+        cls, data: dict[str, Any], strictness_override: Strictness | None = None
+    ) -> Self:
         """Return a model from the given flattened dictionary data.
 
         The input dict is assumed to be as the regex of the model would return it.
@@ -374,13 +377,15 @@ class TemplateModel(metaclass=TemplateModelMeta):
             # this is a direct field
             if len(field_split) == 1:
                 with contextlib.suppress(KeyError):
-                    inst_kwargs[attr] = cls.__fields__[attr].field.extract_value(value)
+                    inst_kwargs[attr] = cls.__fields__[attr].field.parse_value(
+                        value, strictness_override
+                    )
             else:
                 data_by_model_field[attr][field_split[1]] = value
 
         for field_name, field_data in data_by_model_field.items():
             sub_model_cls = cls.__model_fields__[field_name].field.model
-            sub_model = sub_model_cls.from_flat_dict(field_data)
+            sub_model = sub_model_cls.from_flat_dict(field_data, strictness_override)
             inst_kwargs[field_name] = sub_model
 
         return cls(**inst_kwargs)
@@ -392,7 +397,12 @@ class TemplateModel(metaclass=TemplateModelMeta):
         if not r:
             msg = f"Could not parse {raw!r} from {cls.__regex__!r}"
             raise ParseError(msg)
-        return cls.from_flat_dict(r.groupdict())
+
+        # We assume that the regex already rejects invalid fields
+        # We can avoid doing a pass of validation here to speed things up
+        return cls.from_flat_dict(
+            r.groupdict(), strictness_override=Strictness.NONE
+        )
 
     def format(self) -> str:
         """Return the formatted string of this model."""

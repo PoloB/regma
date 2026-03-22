@@ -306,3 +306,8 @@ def test_model_parse_fail_raises_parse_error() -> None:
     """Models shall raise ParseError if parse fails."""
     with pytest.raises(ParseError):
         ComplexModel.parse("/nope/foo_2foo_1")
+
+
+def test_model_to_str_returns_format() -> None:
+    """Models shall return a formatted string when using str."""
+    assert str(ComplexModel("foo", 1, FooBarModel("foo", 2))) == "/root/foo_2foo_1"

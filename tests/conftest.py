@@ -5,21 +5,59 @@ from typing import override
 
 from templex import TemplateModel
 from templex.core import AbstractField
-from templex.core import T_value
 from templex.engine import AbstractRegexEngine
+from templex.error import ValidationError
 from templex.field import integer
 from templex.field import string
+
+
+class AbstractTestField(AbstractField[str]):
+    """A basic field, as close as possible to abstract field."""
+
+    @override
+    def to_regex(self, engine: AbstractRegexEngine) -> str:
+        return ".+"
+
+    @override
+    def get_supported_types(self) -> tuple[type[str]]:
+        return (str,)
+
+    @override
+    def validate(self, value: str) -> None:
+        if value == "invalid":
+            raise ValidationError("Invalid value")
+
+    @override
+    def _parse_value(self, raw: str) -> str:
+        if raw == "unparseable":
+            raise ValueError("Unparseable value")
+        return raw
+
+    @override
+    def _format_value(self, value: str) -> str:
+        if value == "unformattable":
+            raise ValueError("unformattable value")
+        return value
 
 
 class IntChoiceField(AbstractField[int]):
     """An integer choice field."""
 
+    @override
+    def get_supported_types(self) -> tuple[type[int]]:
+        return (int,)
+
+    @override
+    def validate(self, value: int) -> None:
+        return
+
     def __init__(self, choices: list[int]) -> None:
         """Initialize the integer choice field."""
+        super().__init__()
         self.choices = choices
 
     @override
-    def extract_value(self, raw: str) -> int:
+    def _parse_value(self, raw: str) -> int:
         return int(raw)
 
     @override
@@ -28,7 +66,7 @@ class IntChoiceField(AbstractField[int]):
         return rf"(?:{pattern})"
 
     @override
-    def format_value(self, value: T_value) -> str:
+    def _format_value(self, value: int) -> str:
         return str(value)
 
 

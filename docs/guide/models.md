@@ -28,7 +28,7 @@ Raise `DefinitionError` at import time, not at parse time.
 ## Parsing
 
 ```python
-result = Asset.extract_value("chr_toto")
+result = Asset._parse_value("chr_toto")
 result.type  # "chr"
 result.code  # "toto"
 ```

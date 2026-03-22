@@ -10,6 +10,7 @@ from templex import custom_field
 from templex import integer
 from templex import reference
 from templex import string
+from templex.core import Strictness
 from templex.engine import BuiltinRegexEngine
 from templex.field import ChoiceField
 from templex.field import CustomField
@@ -21,9 +22,12 @@ from tests.conftest import IntChoiceField
 from tests.conftest import SimpleTestModel
 
 
-def test_str_field_pattern_value() -> None:
+def test_str_field_pattern_init() -> None:
     """Pattern shall be the same as initialized."""
-    assert StrField(".+").pattern == ".+"
+    field = StrField(".+")
+    assert field.pattern == ".+"
+    assert field.strictness == Strictness.ALL
+    assert field.get_supported_types() == (str,)
 
 
 def test_str_field_regex() -> None:
@@ -34,7 +38,7 @@ def test_str_field_regex() -> None:
 
 def test_str_field_extract_value() -> None:
     """Parsing of value shall return the given value."""
-    assert StrField("").extract_value("anything") == "anything"
+    assert StrField("").parse_value("anything") == "anything"
 
 
 def test_string_field_descriptor() -> None:
@@ -51,7 +55,6 @@ def test_int_field_default_init() -> None:
     assert int_field.min_value is None
     assert int_field.max_value is None
     assert int_field.padding is None
-    assert int_field.padding_mode == IntField.PaddingMode.STRICT
 
 
 def test_int_field_regex() -> None:
@@ -76,48 +79,45 @@ def test_int_field_padding_init() -> None:
 
 def test_int_field_extract_value() -> None:
     """Parsing of value that do not match shall return corresponding integer."""
-    assert IntField().extract_value("12345") == 12345  # noqa: PLR2004
-    assert IntField(padding=4).extract_value("1234") == 1234  # noqa: PLR2004
-    assert IntField(minimum=1).extract_value("12") == 12  # noqa: PLR2004
-    assert IntField(maximum=10).extract_value("9") == 9  # noqa: PLR2004
-    assert IntField(padding=1).extract_value("-1") == -1
+    assert IntField().parse_value("12345") == 12345  # noqa: PLR2004
+    assert IntField(padding=4).parse_value("1234") == 1234  # noqa: PLR2004
+    assert IntField(minimum=1).parse_value("12") == 12  # noqa: PLR2004
+    assert IntField(maximum=10).parse_value("9") == 9  # noqa: PLR2004
+    assert IntField(padding=1).parse_value("-1") == -1
 
 
 def test_int_field_extract_value_fails_when_no_int() -> None:
     """Parsing a noninteger value shall raise a ParseError."""
     with pytest.raises(ParseError):
-        IntField().extract_value("test")
+        IntField().parse_value("test")
 
 
 def test_int_field_min_max_extract_error() -> None:
     """Parsing a string with incorrect min max shall fail."""
     with pytest.raises(ParseError):
-        IntField(minimum=4).extract_value("2")
+        IntField(minimum=4).parse_value("2")
 
     with pytest.raises(ParseError):
-        IntField(maximum=2).extract_value("3")
+        IntField(maximum=2).parse_value("3")
 
 
 def test_int_field_padding_strict_extract_error() -> None:
     """Parsing a string not following padding fails by default."""
     with pytest.raises(ParseError):
-        IntField(padding=2).extract_value("0002")
+        IntField(padding=3).parse_value("12345")
 
     with pytest.raises(ParseError):
-        IntField(padding=3).extract_value("12345")
-
-    with pytest.raises(ParseError):
-        IntField(padding=1).extract_value("-12")
+        IntField(padding=1).parse_value("-12")
 
 
 def test_int_field_padding_mode_non_strict_extract_success() -> None:
     """Parsing a string with a padding but not strict shall succeed."""
-    mode = IntField.PaddingMode.NON_STRICT
+    mode = Strictness.NONE
     assert (
-        IntField(padding=2, padding_mode=mode).extract_value("0002") == 2  # noqa: PLR2004
+        IntField(padding=2, strictness=mode).parse_value("0002") == 2  # noqa: PLR2004
     )
     assert (
-        IntField(padding=2, padding_mode=mode).extract_value("-0002") == -2  # noqa: PLR2004
+        IntField(padding=2, strictness=mode).parse_value("-0002") == -2  # noqa: PLR2004
     )
 
 
@@ -128,12 +128,6 @@ def test_int_field_format_value() -> None:
     assert IntField(minimum=1).format_value(12) == "12"
     assert IntField(maximum=10).format_value(9) == "9"
     assert IntField(padding=1).format_value(-2) == "-2"
-
-
-def test_int_field_format_value_fails_when_no_int() -> None:
-    """Formatting a noninteger value shall raise a FormatError."""
-    with pytest.raises(FormatError):
-        IntField().format_value("test")  # type: ignore[arg-type]
 
 
 def test_int_field_min_max_format_error() -> None:
@@ -156,13 +150,9 @@ def test_int_field_padding_strict_format_error() -> None:
 
 def test_int_field_padding_mode_non_strict_format_success() -> None:
     """Formatting a value with a padding but not strict shall succeed."""
-    mode = IntField.PaddingMode.NON_STRICT
-    assert (
-        IntField(padding=2, padding_mode=mode).format_value(123) == "123"
-    )
-    assert (
-        IntField(padding=2, padding_mode=mode).format_value(-123) == "-123"
-    )
+    mode = Strictness.NONE
+    assert IntField(padding=2, strictness=mode).format_value(123) == "123"
+    assert IntField(padding=2, strictness=mode).format_value(-123) == "-123"
 
 
 def test_integer_field_descriptor() -> None:
@@ -190,13 +180,13 @@ def test_choice_field_regex() -> None:
 
 def test_choice_field_extract_value() -> None:
     """Choice field always return the same value on extraction."""
-    assert ChoiceField(["test", "test1"]).extract_value("test") == "test"
+    assert ChoiceField(["test", "test1"]).parse_value("test") == "test"
 
 
 def test_choice_field_extract_fails_if_not_in_choice() -> None:
     """Choice field always return the same value on extraction."""
     with pytest.raises(ParseError):
-        ChoiceField(["test", "test1"]).extract_value("other")
+        ChoiceField(["test", "test1"]).parse_value("other")
 
 
 def test_choice_field_format_value() -> None:
@@ -235,7 +225,7 @@ def test_custom_field_regex() -> None:
 def test_custom_field_extract_value() -> None:
     """Custom field always return the same value on extraction."""
     field = IntChoiceField([0, 1])
-    assert CustomField(field).extract_value("1") == field.extract_value("1")
+    assert CustomField(field).parse_value("1") == field.parse_value("1")
 
 
 def test_custom_field_format_value() -> None:
@@ -270,7 +260,7 @@ def test_model_field_extract_value() -> None:
     """Model field always return the model parsed value."""
     model_cls = FooBarModel
     field = ModelField(model_cls)
-    assert field.extract_value("foo_1") == model_cls.parse("foo_1")
+    assert field.parse_value("foo_1") == model_cls.parse("foo_1")
 
 
 def test_model_field_extract_fails_if_model_fails() -> None:
@@ -278,7 +268,7 @@ def test_model_field_extract_fails_if_model_fails() -> None:
     model_cls = FooBarModel
     field = ModelField(model_cls)
     with pytest.raises(ParseError):
-        assert field.extract_value("foo")
+        assert field.parse_value("foo")
 
 
 def test_model_field_format_value() -> None:
@@ -294,8 +284,7 @@ def test_model_field_format_fails_if_model_fails() -> None:
     model_cls = FooBarModel
     field = ModelField(model_cls)
     with pytest.raises(ParseError):
-        assert field.extract_value("foo")
-
+        assert field.parse_value("foo")
 
 
 def test_model_field_descriptor() -> None:

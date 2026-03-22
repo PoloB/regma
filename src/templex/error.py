@@ -5,6 +5,10 @@ class TemplexError(Exception):
     """Base for all templex errors."""
 
 
+class ValidationError(TemplexError):
+    """Raised when a value is not valid."""
+
+
 class ParseError(TemplexError):
     """Raised when a string cannot be parsed by a template."""
 
@@ -15,7 +19,3 @@ class FormatError(TemplexError):
 
 class DefinitionError(TemplexError):
     """Raised at class definition time when a TemplateModel is invalid."""
-
-
-class ConsistencyError(ParseError):
-    """Raised when the same slot matches different values at different positions."""

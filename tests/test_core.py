@@ -4,14 +4,18 @@ import re
 
 import pytest
 
+from templex import FormatError
+from templex import ParseError
 from templex.core import BoundField
 from templex.core import Chain
 from templex.core import Delimiter
 from templex.core import FieldReference
 from templex.core import Separator
+from templex.core import Strictness
 from templex.engine import BuiltinRegexEngine
 from templex.field import IntField
 from templex.field import StrField
+from tests.conftest import AbstractTestField
 from tests.conftest import ComplexModel
 from tests.conftest import FooBarModel
 from tests.conftest import SimpleTestModel
@@ -82,6 +86,62 @@ def test_delimiter(
     regex = delimiter.token_re()
     assert isinstance(regex, re.Pattern)
     assert regex.pattern == expected_regex
+
+
+def test_abstract_field_init() -> None:
+    """Test the initialization of abstract field."""
+    field = AbstractTestField()
+    assert field.strictness == Strictness.ALL
+
+
+def test_abstract_field_parse_value() -> None:
+    """Test the parsing of abstract field."""
+    field = AbstractTestField()
+    assert field.parse_value("test") == "test"
+
+
+def test_abstract_field_parse_value_fails() -> None:
+    """Parsing an invalid value shall raise ParseError."""
+    with pytest.raises(ParseError):
+        AbstractTestField().parse_value("invalid")
+
+
+def test_abstract_field_parse_value_success_if_not_strict() -> None:
+    """Parsing an invalid value shall success if not strict."""
+    assert (
+        AbstractTestField().parse_value("invalid", strictness_override=Strictness.NONE)
+        == "invalid"
+    )
+
+
+def test_abstract_field_parse_value_fails_if_value_is_unparseable() -> None:
+    """Parsing an invalid value shall success if not strict."""
+    with pytest.raises(ParseError):
+        AbstractTestField().parse_value(
+            "unparseable", strictness_override=Strictness.NONE
+        )
+
+
+def test_abstract_field_format_value_fails() -> None:
+    """Format an invalid value shall raise FormatError."""
+    with pytest.raises(FormatError):
+        AbstractTestField().format_value("invalid")
+
+
+def test_abstract_field_format_value_success_if_not_strict() -> None:
+    """Formatting an invalid value shall success if not strict."""
+    assert (
+        AbstractTestField().format_value("invalid", strictness_override=Strictness.NONE)
+        == "invalid"
+    )
+
+
+def test_abstract_field_format_value_fails_if_value_is_unformattable() -> None:
+    """Formatting an invalid value shall success if not strict."""
+    with pytest.raises(FormatError):
+        AbstractTestField().format_value(
+            "unformattable", strictness_override=Strictness.NONE
+        )
 
 
 def test_bound_field_init() -> None:

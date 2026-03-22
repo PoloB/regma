@@ -5,11 +5,16 @@ from __future__ import annotations
 import abc
 import enum
 import re
+from enum import auto
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Generic
 from typing import TypeVar
 from typing import override
+
+from templex.error import FormatError
+from templex.error import ParseError
+from templex.error import ValidationError
 
 if TYPE_CHECKING:
     from templex.engine import AbstractRegexEngine
@@ -85,16 +90,80 @@ class Separator(FormatableNode):
 T_value = TypeVar("T_value")
 
 
+class Strictness(enum.Flag):
+    """State the strictness of field parsing and format."""
+
+    NONE = 0
+    PARSE = auto()
+    FORMAT = auto()
+    ALL = PARSE | FORMAT
+
+
 class AbstractField(TemplateNode, abc.ABC, Generic[T_value]):
     """Abstract base for all atomic fields."""
 
+    def __init__(self, strictness: Strictness = Strictness.ALL) -> None:
+        """Initialize the field."""
+        self._strictness = strictness
+
+    @property
+    def strictness(self) -> Strictness:
+        """Return the strictness of the field."""
+        return self._strictness
+
     @abc.abstractmethod
-    def extract_value(self, raw: str) -> T_value:
+    def get_supported_types(self) -> tuple[type[T_value]]:
+        """Return the supported types of the field."""
+
+    @abc.abstractmethod
+    def validate(self, value: T_value) -> None:
+        """Raising ValidationError if the value is not valid."""
+
+    @abc.abstractmethod
+    def _parse_value(self, raw: str) -> T_value:
         """Return the parsed value from the given string."""
 
     @abc.abstractmethod
-    def format_value(self, value: T_value) -> str:
+    def _format_value(self, value: T_value) -> str:
         """Return the formatted value for the given string."""
+
+    def parse_value(
+        self, raw: str, strictness_override: Strictness | None = None
+    ) -> T_value:
+        """Parse the value, handling validation."""
+        strictness = (
+            strictness_override if strictness_override is not None else self.strictness
+        )
+        try:
+            value = self._parse_value(raw)
+        except Exception as e:
+            raise ParseError from e
+
+        if strictness & Strictness.PARSE:
+            try:
+                self.validate(value)
+            except ValidationError as e:
+                raise ParseError from e
+
+        return value
+
+    def format_value(
+        self, value: T_value, strictness_override: Strictness | None = None
+    ) -> str:
+        """Format the value to string, handling validation."""
+        strictness = (
+            strictness_override if strictness_override is not None else self.strictness
+        )
+        if strictness & Strictness.FORMAT:
+            try:
+                self.validate(value)
+            except ValidationError as e:
+                raise FormatError from e
+
+        try:
+            return self._format_value(value)
+        except Exception as e:
+            raise FormatError from e
 
 
 class Delimiter(enum.Enum):
@@ -208,4 +277,4 @@ class FieldReference(FormatableNode):
         for attr in self.__name.split("."):
             value = getattr(value, attr)
 
-        return self._field.format_value(value)
+        return self._field._format_value(value)
