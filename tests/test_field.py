@@ -137,6 +137,7 @@ def test_int_field_format_value() -> None:
     """Format of value shall follow padding."""
     assert IntField().format_value(12345) == "12345"
     assert IntField(padding=4).format_value(1234) == "1234"
+    assert IntField(padding=4).format_value(2) == "0002"
     assert IntField(minimum=1).format_value(12) == "12"
     assert IntField(maximum=10).format_value(9) == "9"
     assert IntField(padding=1).format_value(-2) == "-2"

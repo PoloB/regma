@@ -131,7 +131,9 @@ class IntField(PatternField[int]):
 
     @override
     def _format_value(self, value: int) -> str:
-        return str(value)
+        return (
+            str(value).zfill(self._padding) if self._padding is not None else str(value)
+        )
 
 
 def integer(
