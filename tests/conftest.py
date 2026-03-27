@@ -25,18 +25,21 @@ class AbstractTestField(AbstractField[str]):
     @override
     def validate(self, value: str) -> None:
         if value == "invalid":
-            raise ValidationError("Invalid value")
+            msg = "Invalid value"
+            raise ValidationError(msg)
 
     @override
     def _parse_value(self, raw: str) -> str:
         if raw == "unparseable":
-            raise ValueError("Unparseable value")
+            msg = "Unparseable value"
+            raise ValueError(msg)
         return raw
 
     @override
     def _format_value(self, value: str) -> str:
         if value == "unformattable":
-            raise ValueError("unformattable value")
+            msg = "Unformattable value"
+            raise ValueError(msg)
         return value
 
 

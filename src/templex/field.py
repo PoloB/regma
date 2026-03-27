@@ -247,7 +247,7 @@ class ModelField(AbstractField[T_field_model]):
 
     @override
     def validate(self, value: T_field_model) -> None:
-        # TODO(PoloB): validate the model
+        # Model is self validating
         pass
 
     @override
