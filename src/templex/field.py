@@ -205,11 +205,11 @@ class CustomField(AbstractField[T_field]):
 
     @override
     def _parse_value(self, raw: str) -> T_field:
-        return self._custom_field._parse_value(raw)
+        return self._custom_field.parse_value(raw)
 
     @override
     def _format_value(self, value: T_field) -> str:
-        return self._custom_field._format_value(value)
+        return self._custom_field.format_value(value)
 
 
 def custom_field(field: AbstractField[T_field]) -> Any:  # noqa: ANN401

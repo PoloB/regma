@@ -62,8 +62,8 @@ def test_fields_are_extracted_correctly() -> None:
         __template__ = "{test}"
         test: str = string(r"\w+")
 
-    assert len(TestModel.__fields__) == 1
-    assert "test" in TestModel.__fields__
+    assert len(TestModel.__typed_fields__) == 1
+    assert "test" in TestModel.__typed_fields__
     assert len(TestModel.__chain__.nodes) == 1
     assert TestModel.__regex__ == r"(?P<test>\w+)"
 
@@ -75,8 +75,8 @@ def test_sep_fields_are_extracted_correctly() -> None:
         __template__ = "sep{test}other"
         test: str = string(r"\w+")
 
-    assert len(TestModel.__fields__) == 1
-    assert "test" in TestModel.__fields__
+    assert len(TestModel.__typed_fields__) == 1
+    assert "test" in TestModel.__typed_fields__
     assert len(TestModel.__chain__.nodes) == 3  # noqa: PLR2004
     assert TestModel.__regex__ == r"sep(?P<test>\w+)other"
 
@@ -88,8 +88,8 @@ def test_model_can_reference_field_multiple_times() -> None:
         __template__ = "{test}/{test}"
         test: str = string(r"\w+")
 
-    assert len(TestModel.__fields__) == 1
-    assert "test" in TestModel.__fields__
+    assert len(TestModel.__typed_fields__) == 1
+    assert "test" in TestModel.__typed_fields__
     assert len(TestModel.__chain__.nodes) == 3  # noqa: PLR2004
     assert TestModel.__regex__ == r"(?P<test>\w+)/(?P=test)"
 
@@ -108,7 +108,7 @@ def test_model_can_reference_other_models_through_model_field() -> None:
         bar: str = string(r"\w+")
         first: FirstModel = reference(FirstModel)
 
-    assert len(SecondModel.__fields__) == 2  # noqa: PLR2004
+    assert len(SecondModel.__typed_fields__) == 2  # noqa: PLR2004
     assert len(SecondModel.__model_fields__) == 1
     assert (
         SecondModel.__regex__
@@ -205,15 +205,15 @@ def test_model_is_instantiated_correctly() -> None:
 
 def test_model_eq() -> None:
     """Models are equal if their fields are equal."""
-    mode1 = ComplexModel("foo", 1, FooBarModel("test", 1))
-    mode2 = ComplexModel("foo", 1, FooBarModel("test", 1))
+    mode1 = ComplexModel(FooBarModel("test", 1), "foo", 1)
+    mode2 = ComplexModel(FooBarModel("test", 1), "foo", 1)
     assert mode1 == mode2
 
 
 def test_model_eq_different() -> None:
     """Models are different if their fields are not equal."""
-    mode1 = ComplexModel("foo", 1, FooBarModel("test", 1))
-    mode2 = ComplexModel("foo", 1, FooBarModel("test", 2))
+    mode1 = ComplexModel(FooBarModel("test", 1), "foo", 1)
+    mode2 = ComplexModel(FooBarModel("test", 2), "foo", 1)
     assert mode1 != mode2
 
 
@@ -259,7 +259,7 @@ def test_model_from_flat_dict() -> None:
     """Models shall be initializable from a flat dict."""
     data = {"foo": "foo", "bar": 1, "foo_bar__foo": "foo", "foo_bar__bar": 2}
     inst = ComplexModel.from_flat_dict(data)
-    assert inst == ComplexModel("foo", 1, FooBarModel("foo", 2))
+    assert inst == ComplexModel(FooBarModel("foo", 2), "foo", 1)
 
 
 def test_model_from_flat_dict_excess() -> None:
@@ -272,7 +272,7 @@ def test_model_from_flat_dict_excess() -> None:
         "unknown": 42,
     }
     inst = ComplexModel.from_flat_dict(data)
-    assert inst == ComplexModel("foo", 1, FooBarModel("foo", 2))
+    assert inst == ComplexModel(FooBarModel("foo", 2), "foo", 1)
 
 
 def test_model_from_flat_dict_with_unflattened_sub_model() -> None:
@@ -286,7 +286,7 @@ def test_model_from_flat_dict_with_unflattened_sub_model() -> None:
         "unknown": 42,
     }
     inst = ComplexModel.from_flat_dict(data)
-    assert inst == ComplexModel("foo", 1, FooBarModel("foo", 2))
+    assert inst == ComplexModel(FooBarModel("foo", 2), "foo", 1)
 
 
 def test_model_from_flat_dict_fail_with_missing_key() -> None:
@@ -298,8 +298,8 @@ def test_model_from_flat_dict_fail_with_missing_key() -> None:
 
 def test_model_parse() -> None:
     """Models shall parse successfully."""
-    inst = ComplexModel.parse("/root/foo_2foo_1")
-    assert inst == ComplexModel("foo", 1, FooBarModel("foo", 2))
+    inst = ComplexModel.parse("/root/foo_2_foo_1")
+    assert inst == ComplexModel(FooBarModel("foo", 2), "foo", 1)
 
 
 def test_model_parse_fail_raises_parse_error() -> None:
@@ -310,4 +310,9 @@ def test_model_parse_fail_raises_parse_error() -> None:
 
 def test_model_to_str_returns_format() -> None:
     """Models shall return a formatted string when using str."""
-    assert str(ComplexModel("foo", 1, FooBarModel("foo", 2))) == "/root/foo_2foo_1"
+    assert str(ComplexModel(FooBarModel("foo", 2), "foo", 1)) == "/root/foo_2_foo_1"
+
+
+def test_model_repr() -> None:
+    """Models shall return a string when using repr."""
+    assert isinstance(repr(ComplexModel(FooBarModel("foo", 2), "foo", 1)), str)

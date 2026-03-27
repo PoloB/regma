@@ -88,7 +88,7 @@ class FooBarModel(TemplateModel):
 class ComplexModel(TemplateModel):
     """Model with fields and model fields."""
 
-    __template__ = "/root/{foo_bar}{foo}_{bar}"
+    __template__ = "/root/{foo_bar.foo}_{foo_bar.bar}_{foo}_{bar}"
+    foo_bar: FooBarModel
     foo: str = string(r"\w+")
     bar: int = integer()
-    foo_bar: FooBarModel

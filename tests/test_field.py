@@ -41,6 +41,17 @@ def test_str_field_extract_value() -> None:
     assert StrField("").parse_value("anything") == "anything"
 
 
+def test_str_field_format_value() -> None:
+    """Format of value shall match pattern."""
+    assert StrField(r"\d+").format_value("12345") == "12345"
+
+
+def test_str_field_format_value_fail() -> None:
+    """Format of value shall fail if pattern does not match."""
+    with pytest.raises(FormatError):
+        StrField(r"\d+").format_value("nope")
+
+
 def test_string_field_descriptor() -> None:
     """String field descriptor shall return an StrField."""
     descriptor = string(r"\w+")
@@ -50,11 +61,12 @@ def test_string_field_descriptor() -> None:
 
 def test_int_field_default_init() -> None:
     """Int field shall be initialized."""
-    int_field = IntField()
-    assert int_field.pattern == r"\d+"
-    assert int_field.min_value is None
-    assert int_field.max_value is None
-    assert int_field.padding is None
+    field = IntField()
+    assert field.pattern == r"\d+"
+    assert field.min_value is None
+    assert field.max_value is None
+    assert field.padding is None
+    assert field.get_supported_types() == (int,)
 
 
 def test_int_field_regex() -> None:
@@ -170,6 +182,7 @@ def test_choice_field_init() -> None:
     field = ChoiceField(["test", "test1"])
     assert field.choices == ["test", "test1"]
     assert field.pattern == r"(?:test|test1)"
+    assert field.get_supported_types() == (str,)
 
 
 def test_choice_field_regex() -> None:
@@ -213,6 +226,7 @@ def test_custom_field_init() -> None:
     int_field = IntChoiceField([0, 1])
     field = CustomField(int_field)
     assert field.field is int_field
+    assert field.get_supported_types() == int_field.get_supported_types()
 
 
 def test_custom_field_regex() -> None:
@@ -247,6 +261,7 @@ def test_model_field_init() -> None:
     model_cls = SimpleTestModel
     model_field = ModelField(model_cls)
     assert model_field.model is model_cls
+    assert model_field.get_supported_types() == (SimpleTestModel,)
 
 
 def test_model_field_regex() -> None:

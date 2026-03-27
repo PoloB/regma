@@ -46,16 +46,16 @@ class Chain(FormatableNode):
 
     def __init__(self, nodes: list[FormatableNode]) -> None:
         """Initialize the chain."""
-        self.__nodes = nodes
+        self._nodes = nodes
 
     @property
     def nodes(self) -> list[FormatableNode]:
         """Return the ordered sequence of template nodes."""
-        return self.__nodes
+        return self._nodes
 
     @override
     def to_regex(self, engine: AbstractRegexEngine) -> str:
-        return "".join(n.to_regex(engine) for n in self.__nodes)
+        return "".join(n.to_regex(engine) for n in self._nodes)
 
     @override
     def to_chain(self) -> Chain:
@@ -64,7 +64,7 @@ class Chain(FormatableNode):
     @override
     def format(self, model: TemplateModel) -> str:
         """Return the formatted string of this chain."""
-        return "".join(n.format(model) for n in self.__nodes)
+        return "".join(n.format(model) for n in self._nodes)
 
 
 class Separator(FormatableNode):
@@ -277,4 +277,4 @@ class FieldReference(FormatableNode):
         for attr in self.__name.split("."):
             value = getattr(value, attr)
 
-        return self._field._format_value(value)
+        return self._field.format_value(value)

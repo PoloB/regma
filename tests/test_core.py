@@ -92,6 +92,9 @@ def test_abstract_field_init() -> None:
     """Test the initialization of abstract field."""
     field = AbstractTestField()
     assert field.strictness == Strictness.ALL
+    assert field.get_supported_types() == (str,)
+    regex_engine = BuiltinRegexEngine()
+    assert field.to_regex(regex_engine) == ".+"
 
 
 def test_abstract_field_parse_value() -> None:
@@ -198,4 +201,4 @@ def test_field_reference_to_chain() -> None:
 def test_field_reference_format() -> None:
     """Test the field reference format."""
     field_ref = FieldReference("foo_bar.bar", IntField())
-    assert field_ref.format(ComplexModel("test", 1, FooBarModel("foo", 2))) == "2"
+    assert field_ref.format(ComplexModel(FooBarModel("foo", 2), "test", 1)) == "2"

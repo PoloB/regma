@@ -101,7 +101,7 @@ def _parse_template(template_model: TemplateModelMeta) -> Chain:
 
 def _validate_bound_field_names(model_cls: TemplateModelMeta) -> None:
     """Validate all fields have a valid name."""
-    for attr in (*model_cls.__model_fields__, *model_cls.__fields__):
+    for attr in (*model_cls.__model_fields__, *model_cls.__typed_fields__):
         if attr.endswith("_"):
             msg = (
                 f"{model_cls.__name__}: field attribute {attr!r} cannot ends with "
@@ -125,7 +125,7 @@ def _validate_field_references(model_cls: TemplateModelMeta) -> None:
         model_cls_: TemplateModelMeta, references: set[str], parent_bound: str
     ) -> None:
         # Check leaf fields are used in the template
-        missing_fields = set(model_cls_.__fields__).difference(references)
+        missing_fields = set(model_cls_.__typed_fields__).difference(references)
         if missing_fields:
             # Rebuild the full missing field
             missing_full_fields = sorted(
@@ -175,6 +175,8 @@ class TemplateModelMeta(type):
     4. Validates sub-field accesses (``slot.field``) against the sub-model.
     """
 
+    __field_names__: list[str]
+    __typed_fields__: dict[str, BoundField[AbstractField[Any]]]
     __fields__: dict[str, BoundField[AbstractField[Any]]]
     __model_fields__: dict[str, BoundField[ModelField[TemplateModel]]]
     __template__: str
@@ -199,25 +201,30 @@ class TemplateModelMeta(type):
         # Create bounded field objects
         bound_fields: dict[str, BoundField[Any]] = {}
         model_fields: dict[str, BoundField[ModelField[TemplateModel]]] = {}
+        fields: dict[str, BoundField[Any]] = {}
 
         # First evaluate the model field references by checking annotations
         for attr, hint in typing.get_type_hints(cls).items():
-            if not isinstance(hint, type) or not issubclass(hint, TemplateModel):
+            if not isinstance(hint, type):
                 continue
 
-            model_field = ModelField(hint)
-            setattr(cls, attr, model_field)
-            model_fields[attr] = BoundField(attr, model_field)
+            attr_value = namespace.get(attr)
 
-        # Check for other fields
-        for attr, value in namespace.items():
-            if not isinstance(value, AbstractField) or attr in model_fields:
-                continue
+            if issubclass(hint, TemplateModel):
+                model_field = ModelField(hint)
+                setattr(cls, attr, model_field)
+                new_model_bound_field = BoundField(attr, model_field)
+                model_fields[attr] = new_model_bound_field
+                fields[attr] = new_model_bound_field
 
-            # Separate value fields from model fields
-            bound_fields[attr] = BoundField(attr, value)
+            elif isinstance(attr_value, AbstractField):
+                # Separate value fields from model fields
+                new_field = BoundField(attr, attr_value)
+                bound_fields[attr] = BoundField(attr, attr_value)
+                fields[attr] = new_field
 
-        cls.__fields__ = bound_fields
+        cls.__fields__ = fields
+        cls.__typed_fields__ = bound_fields
         cls.__model_fields__ = model_fields
         _validate_bound_field_names(cls)
 
@@ -287,6 +294,7 @@ class TemplateModel(metaclass=TemplateModelMeta):
     __dataclass_transform__: ClassVar[dict[str, Any]]
     __chain__: Chain
     __delimiter__ = Delimiter.CURLY
+    __typed_fields__: dict[str, BoundField[AbstractField[Any]]]
     __fields__: dict[str, BoundField[AbstractField[Any]]]
     __model_fields__: dict[str, BoundField[ModelField[TemplateModel]]]
     __regex_engine__: type[AbstractRegexEngine] = BuiltinRegexEngine
@@ -325,11 +333,7 @@ class TemplateModel(metaclass=TemplateModelMeta):
             return NotImplemented
         # All fields should be equals
         # Start with value fields to quicly eliminate two different objects
-        for field_name in self.__fields__:
-            if getattr(self, field_name) != getattr(other, field_name):
-                return False
-
-        for field_name in self.__model_fields__:
+        for field_name in self.fields():
             if getattr(self, field_name) != getattr(other, field_name):
                 return False
 
@@ -337,24 +341,23 @@ class TemplateModel(metaclass=TemplateModelMeta):
 
     def __hash__(self) -> int:
         """Return hash of model."""
-        return hash(
-            (
-                type(self),
-                *(getattr(self, attr) for attr in self.__fields__),
-                *(getattr(self, attr) for attr in self.__model_fields__),
-            )
-        )
+        return hash((type(self), *(getattr(self, attr) for attr in self.fields())))
 
     def __str__(self) -> str:
         """Return formatted representation of model."""
         return self.format()
 
+    def __repr__(self) -> str:
+        """Return formatted representation of model."""
+        kwargs_str = ", ".join(
+            [f"{name}={getattr(self, name)!r}" for name in self.fields()]
+        )
+        return f"{self.__class__.__name__}({kwargs_str})"
+
     @classmethod
     def fields(cls) -> dict[str, AbstractField[Any]]:
         """Return the fields available in the template model."""
-        return {name: bt.field for name, bt in cls.__fields__.items()} | {
-            name: bt.field for name, bt in cls.__model_fields__.items()
-        }
+        return {name: bt.field for name, bt in cls.__fields__.items()}
 
     @classmethod
     def from_flat_dict(
@@ -377,7 +380,7 @@ class TemplateModel(metaclass=TemplateModelMeta):
             # this is a direct field
             if len(field_split) == 1:
                 with contextlib.suppress(KeyError):
-                    inst_kwargs[attr] = cls.__fields__[attr].field.parse_value(
+                    inst_kwargs[attr] = cls.__typed_fields__[attr].field.parse_value(
                         value, strictness_override
                     )
             else:
@@ -400,9 +403,7 @@ class TemplateModel(metaclass=TemplateModelMeta):
 
         # We assume that the regex already rejects invalid fields
         # We can avoid doing a pass of validation here to speed things up
-        return cls.from_flat_dict(
-            r.groupdict(), strictness_override=Strictness.NONE
-        )
+        return cls.from_flat_dict(r.groupdict(), strictness_override=Strictness.NONE)
 
     def format(self) -> str:
         """Return the formatted string of this model."""
