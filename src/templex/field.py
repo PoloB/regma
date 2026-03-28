@@ -7,7 +7,8 @@ import re
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import TypeVar
-from typing import override
+
+from typing_extensions import override
 
 from templex.core import AbstractField
 from templex.core import Strictness

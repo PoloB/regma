@@ -1,7 +1,8 @@
 """Common configuration for tests in templex."""
 
 import re
-from typing import override
+
+from typing_extensions import override
 
 from templex import TemplateModel
 from templex.core import AbstractField
