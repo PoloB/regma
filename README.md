@@ -7,27 +7,9 @@
 
 **Object-based, bidirectional string templating with declarative result types.**
 
-regma lets you define string templates using Python objects. Each token
-is typed, reusable, and configurable. Parse results are typed model
-instances — not plain dicts.
-
-```python
-from regma import TemplateModel, Field, Slot
-from regma.field import StrField, ChoiceField
-
-ASSET_TYPE = ChoiceField("type", choices=["chr", "prp", "env", "veh"])
-ASSET_CODE = StrField("code", pattern=r"[a-z][a-z0-9]+")
-
-class AssetResult(TemplateModel):
-    type: str = Field(ASSET_TYPE)
-    code: str = Field(ASSET_CODE)
-    template = ASSET_TYPE >> "_" >> ASSET_CODE
-
-result = AssetResult.parse("chr_toto")
-result.type   # "chr"
-result.code   # "toto"
-str(result)   # "chr_toto"
-```
+regma lets you define string templates using Python objects.
+Each token is typed, reusable, and configurable.
+Parse results are typed model instances — not plain dicts.
 
 ## Installation
 
@@ -35,55 +17,55 @@ str(result)   # "chr_toto"
 pip install regma
 ```
 
-Requires Python 3.10+. No dependencies.
-
-## Documentation
-
-Full documentation at **[your-org.github.io/regma](https://your-org.github.io/regma)**.
+Requires Python 3.11+.
 
 ## Features
 
-- **Typed tokens** — `StrToken`, `IntToken`, `ChoiceToken`, `RegexToken`
-- **Immutable reconfiguration** — `VERSION.configure(format="{:02d}")`
-- **Nested templates** — `Slot` embeds one model inside another, producing a typed parse tree
-- **Reuse enforcement** — repeated slots must match the same value; enforced by the regex engine
-- **Two template syntaxes** — chain (`>>`) and string (`"{slot.field}/{slot}"`) — identical output
-- **Configurable delimiters** — `{}`, `<>`, `[]`; global or per-model
+- **Dataclass like structure**: your models are properly typed and subclasses
+- **Typed fields**: `string`, `integer`, `choice`
+- **Reference to other models**: using annotations or using the `reference` field 
+- **Field validation**: fields are validated both during formatting and parsing. Strictness can be configured in both directions independently
+- **Configurable delimiters**: `{}`, `<>`, `[]`; global or per-model
+- **Great developer experience**: common linter and static type checker are supported. Most common IDEs (VS Code, PyCharm) provide autocompletion 
 
-## Quick example
+## Concrete exemple in VFX/Animation pipelines
 
 ```python
-from regma import TemplateModel, Field, Slot
-from regma.fields import StrField, ChoiceField
+from regma import TemplateModel
+from regma import string, choice, integer
 
-GROOM = StrField("groom", pattern=r"[a-z]+")
+class Asset(TemplateModel):
+    type: str = choice(["chr", "prp", "set"])
+    code: str = string(r"[a-z][a-z0-9]+")
+    template = "{type}_{code}"
 
-class GroomPathResult(TemplateModel):
-    asset_source = Slot(AssetResult)
-    asset_target = Slot(AssetResult)
-    groom: str   = Field(GROOM)
+# Create an asset from its fields
+asset = Asset("chr", "foo")
+
+# Get it as a string
+asset_str = asset.format()  # or using str(asset)
+
+# Parse an asset from its string
+parsed_asset = Asset.parse("chr_foo")
+
+# Build a more complex example to build a path
+class GroomRetargetInfoPath(TemplateModel):
+    source_asset: Asset
+    target_asset: Asset
+    groom_name: str = string(r"[a-z][a-z0-9]+")
 
     template = (
-        "/root/assets/{asset_source.type}/{asset_source}"
-        "/modeling/GB_{asset_source}_{groom}_{asset_target}"
+        "/root/assets/{target_asset.type}/{target_asset}/{asset_target}_{groom}_{asset_target}.json"
     )
 
-path = "/root/assets/chr/chr_toto/modeling/GB_chr_toto_hair_chr_tata"
-r = GroomPathResult.parse(path)
+# Create a new model
+groom_info = GroomRetargetInfoPath(Asset("chr", "foo"), Asset("chr", "bar"), "hair")
 
-r.asset_source.type   # "chr"
-r.groom               # "hair"
-r.asset_target.code   # "tata"
-str(r) == path        # True
-```
+# Get it as string
+groom_info_path = groom_info.format()  # /root/assets/chr/chr_foo/chr_foo_hair_chr_bar.json
 
-## Development
-
-```bash
-git clone https://github.com/your-org/regma
-cd regma
-pip install -e ".[dev]"
-pytest tests/ -v --cov=regma
+# Parse the path to its information
+parsed_groom_info = GroomRetargetInfoPath.parse("/root/assets/chr/chr_foo/chr_foo_hair_chr_bar.json")
 ```
 
 ## License

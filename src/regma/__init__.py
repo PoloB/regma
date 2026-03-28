@@ -8,7 +8,7 @@ from regma.core import TemplateNode
 from regma.error import DefinitionError
 from regma.error import FormatError
 from regma.error import ParseError
-from regma.error import regmaError
+from regma.error import RegmaError
 from regma.field import choice
 from regma.field import custom_field
 from regma.field import integer
@@ -20,9 +20,9 @@ __all__ = [
     "DefinitionError",
     "FormatError",
     "ParseError",
+    "RegmaError",
     "TemplateModel",
     "TemplateNode",
-    "regmaError",
     "choice",
     "custom_field",
     "integer",

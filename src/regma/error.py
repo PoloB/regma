@@ -1,21 +1,21 @@
 """regma.exceptions — all library-specific errors."""
 
 
-class regmaError(Exception):
+class RegmaError(Exception):
     """Base for all regma errors."""
 
 
-class ValidationError(regmaError):
+class ValidationError(RegmaError):
     """Raised when a value is not valid."""
 
 
-class ParseError(regmaError):
+class ParseError(RegmaError):
     """Raised when a string cannot be parsed by a template."""
 
 
-class FormatError(regmaError):
+class FormatError(RegmaError):
     """Raised when a value cannot be formatted by a field."""
 
 
-class DefinitionError(regmaError):
+class DefinitionError(RegmaError):
     """Raised at class definition time when a TemplateModel is invalid."""
