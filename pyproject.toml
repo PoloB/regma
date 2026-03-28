@@ -30,7 +30,6 @@ dependencies = []
 dev = [
     { include-group = "test" },
     { include-group = "lint" },
-    { include-group = "benchmark" },
 ]
 test = [
     "pytest",
