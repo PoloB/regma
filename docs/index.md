@@ -1,14 +1,14 @@
-# templex
+# regma
 
 **Object-based, bidirectional string templating with declarative result types.**
 
-templex lets you define string templates using Python objects instead of
+regma lets you define string templates using Python objects instead of
 pattern strings. Each token is reusable and configurable. Parse results are
 typed model instances — not plain dicts.
 
 ---
 
-## Why templex?
+## Why regma?
 
 Most templating libraries (like [lucidity](https://github.com/4degrees/lucidity))
 work by parsing a pattern string like `{type}_{code}` at runtime. This means:
@@ -18,12 +18,12 @@ work by parsing a pattern string like `{type}_{code}` at runtime. This means:
 - Reuse means copy-pasting strings
 - Parsing and formatting are disconnected
 
-templex turns each token into a **first-class object** and each template
+regma turns each token into a **first-class object** and each template
 result into a **typed model instance**:
 
 ```python
-from templex import TemplateModel, Field, Slot
-from templex.fields import StrField, ChoiceField, IntField
+from regma import TemplateModel, Field, Slot
+from regma.fields import StrField, ChoiceField, IntField
 
 ASSET_TYPE = ChoiceField("type", choices=["chr", "prp", "env", "veh"])
 ASSET_CODE = StrField("code", pattern=r"[a-z][a-z0-9]+")
@@ -63,7 +63,7 @@ str(result)   # "chr_toto"  ← bidirectional
 ## Installation
 
 ```bash
-pip install templex
+pip install regma
 ```
 
 Requires Python 3.10+, no dependencies.
@@ -73,9 +73,9 @@ Requires Python 3.10+, no dependencies.
 ## Quick example
 
 ```python
-import templex
-from templex import TemplateModel, Field, Slot, Delimiter
-from templex.fields import StrField, ChoiceField, IntField
+import regma
+from regma import TemplateModel, Field, Slot, Delimiter
+from regma.fields import StrField, ChoiceField, IntField
 
 # ── Fields ────────────────────────────────────────────────────────────────────
 ASSET_TYPE = ChoiceField("type", choices=["chr", "prp", "env", "veh"])

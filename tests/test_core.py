@@ -1,20 +1,20 @@
-"""Tests the core module of templex."""
+"""Tests the core module of regma."""
 
 import re
 
 import pytest
 
-from templex import FormatError
-from templex import ParseError
-from templex.core import BoundField
-from templex.core import Chain
-from templex.core import Delimiter
-from templex.core import FieldReference
-from templex.core import Separator
-from templex.core import Strictness
-from templex.engine import BuiltinRegexEngine
-from templex.field import IntField
-from templex.field import StrField
+from regma import FormatError
+from regma import ParseError
+from regma.core import BoundField
+from regma.core import Chain
+from regma.core import Delimiter
+from regma.core import FieldReference
+from regma.core import Separator
+from regma.core import Strictness
+from regma.engine import BuiltinRegexEngine
+from regma.field import IntField
+from regma.field import StrField
 from tests.conftest import AbstractTestField
 from tests.conftest import ComplexModel
 from tests.conftest import FooBarModel

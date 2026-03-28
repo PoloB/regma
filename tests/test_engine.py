@@ -1,7 +1,7 @@
-"""Tests the engine module of templex."""
+"""Tests the engine module of regma."""
 
-from templex.core import Separator
-from templex.engine import BuiltinRegexEngine
+from regma.core import Separator
+from regma.engine import BuiltinRegexEngine
 
 
 def test_regex_builder_init() -> None:

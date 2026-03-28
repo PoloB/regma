@@ -1,11 +1,11 @@
 # Configuration
 
-::: templex.config.Delimiter
+::: regma.config.Delimiter
 
 ---
 
-::: templex.config.configure
+::: regma.config.configure
 
 ---
 
-::: templex.config.get_delimiter
+::: regma.config.get_delimiter

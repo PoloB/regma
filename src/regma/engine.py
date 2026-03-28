@@ -6,7 +6,7 @@ import abc
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from templex import TemplateNode
+    from regma import TemplateNode
 
 
 class AbstractRegexEngine(abc.ABC):

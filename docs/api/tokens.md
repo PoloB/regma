@@ -1,19 +1,19 @@
 # Fields
 
-::: templex.fields.Field
+::: regma.fields.Field
 
 ---
 
-::: templex.fields.StrField
+::: regma.fields.StrField
 
 ---
 
-::: templex.fields.IntField
+::: regma.fields.IntField
 
 ---
 
-::: templex.tokens.ChoiceToken
+::: regma.tokens.ChoiceToken
 
 ---
 
-::: templex.tokens.RegexToken
+::: regma.tokens.RegexToken

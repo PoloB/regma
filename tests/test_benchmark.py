@@ -1,14 +1,14 @@
-"""Benchmark templex."""
+"""Benchmark regma."""
 
 from __future__ import annotations
 
 import functools
 from typing import TYPE_CHECKING
 
-from templex import TemplateModel
-from templex import integer
-from templex import reference
-from templex import string
+from regma import TemplateModel
+from regma import integer
+from regma import reference
+from regma import string
 
 if TYPE_CHECKING:
     from pytest_benchmark.fixture import BenchmarkFixture

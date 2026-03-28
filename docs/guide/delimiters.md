@@ -1,6 +1,6 @@
 # Delimiters
 
-When using the string template syntax, templex supports three delimiter
+When using the string template syntax, regma supports three delimiter
 styles. The `Delimiter` enum controls which style is expected.
 
 ---
@@ -38,10 +38,10 @@ declaration-time concern only.
 Set the default delimiter for all models that don't declare their own:
 
 ```python
-import templex
-from templex import Delimiter
+import regma
+from regma import Delimiter
 
-templex.configure(delimiter=Delimiter.ANGLE)
+regma.configure(delimiter=Delimiter.ANGLE)
 ```
 
 This affects all `TemplateModel` subclasses defined **after** this call.

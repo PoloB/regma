@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "templex"
+name = "regma"
 version = "0.1.0"
 description = "Object-based, bidirectional string templating with declarative result types"
 readme = "README.md"
@@ -49,13 +49,13 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/your-org/templex"
-Repository = "https://github.com/your-org/templex"
-Issues = "https://github.com/your-org/templex/issues"
-Changelog = "https://github.com/your-org/templex/CHANGELOG.md"
+Homepage = "https://github.com/your-org/regma"
+Repository = "https://github.com/your-org/regma"
+Issues = "https://github.com/your-org/regma/issues"
+Changelog = "https://github.com/your-org/regma/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/templex"]
+packages = ["src/regma"]
 
 [tool.pytest.ini_options]
 pythonpath = "src"

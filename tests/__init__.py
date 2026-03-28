@@ -1,1 +1,1 @@
-"""Tests for the templex package."""
+"""Tests for the regma package."""

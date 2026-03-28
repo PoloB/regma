@@ -2,21 +2,21 @@
 
 import pytest
 
-from templex import DefinitionError
-from templex import FormatError
-from templex import ParseError
-from templex import choice
-from templex import custom_field
-from templex import integer
-from templex import reference
-from templex import string
-from templex.core import Strictness
-from templex.engine import BuiltinRegexEngine
-from templex.field import ChoiceField
-from templex.field import CustomField
-from templex.field import IntField
-from templex.field import ModelField
-from templex.field import StrField
+from regma import DefinitionError
+from regma import FormatError
+from regma import ParseError
+from regma import choice
+from regma import custom_field
+from regma import integer
+from regma import reference
+from regma import string
+from regma.core import Strictness
+from regma.engine import BuiltinRegexEngine
+from regma.field import ChoiceField
+from regma.field import CustomField
+from regma.field import IntField
+from regma.field import ModelField
+from regma.field import StrField
 from tests.conftest import FooBarModel
 from tests.conftest import IntChoiceField
 from tests.conftest import SimpleTestModel

@@ -879,7 +879,7 @@ wheels = [
 ]
 
 [[package]]
-name = "templex"
+name = "regma"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

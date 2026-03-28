@@ -1,15 +1,15 @@
-"""Common configuration for tests in templex."""
+"""Common configuration for tests in regma."""
 
 import re
 
 from typing_extensions import override
 
-from templex import TemplateModel
-from templex.core import AbstractField
-from templex.engine import AbstractRegexEngine
-from templex.error import ValidationError
-from templex.field import integer
-from templex.field import string
+from regma import TemplateModel
+from regma.core import AbstractField
+from regma.engine import AbstractRegexEngine
+from regma.error import ValidationError
+from regma.field import integer
+from regma.field import string
 
 
 class AbstractTestField(AbstractField[str]):

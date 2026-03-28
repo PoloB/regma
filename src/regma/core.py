@@ -13,13 +13,13 @@ from typing import TypeVar
 
 from typing_extensions import override
 
-from templex.error import FormatError
-from templex.error import ParseError
-from templex.error import ValidationError
+from regma.error import FormatError
+from regma.error import ParseError
+from regma.error import ValidationError
 
 if TYPE_CHECKING:
-    from templex.engine import AbstractRegexEngine
-    from templex.model import TemplateModel
+    from regma.engine import AbstractRegexEngine
+    from regma.model import TemplateModel
 
 
 class TemplateNode(abc.ABC):

@@ -13,28 +13,28 @@ from typing import TypeVar
 
 from typing_extensions import dataclass_transform
 
-from templex import reference
-from templex.core import AbstractField
-from templex.core import BoundField
-from templex.core import Chain
-from templex.core import Delimiter
-from templex.core import FieldReference
-from templex.core import FormatableNode
-from templex.core import Separator
-from templex.core import Strictness
-from templex.engine import AbstractRegexEngine
-from templex.engine import BuiltinRegexEngine
-from templex.error import DefinitionError
-from templex.error import ParseError
-from templex.field import ModelField
-from templex.field import choice
-from templex.field import custom_field
-from templex.field import integer
-from templex.field import string
+from regma import reference
+from regma.core import AbstractField
+from regma.core import BoundField
+from regma.core import Chain
+from regma.core import Delimiter
+from regma.core import FieldReference
+from regma.core import FormatableNode
+from regma.core import Separator
+from regma.core import Strictness
+from regma.engine import AbstractRegexEngine
+from regma.engine import BuiltinRegexEngine
+from regma.error import DefinitionError
+from regma.error import ParseError
+from regma.field import ModelField
+from regma.field import choice
+from regma.field import custom_field
+from regma.field import integer
+from regma.field import string
 
 
 def _parse_template(template_model: TemplateModelMeta) -> Chain:
-    """Convert a template string into a :class:`~templex.core.Chain`."""
+    """Convert a template string into a :class:`~regma.core.Chain`."""
     template = template_model.__template__
     delimiter = template_model.__delimiter__
     token_re = delimiter.token_re()
@@ -168,9 +168,9 @@ T_model = TypeVar("T_model", bound="TemplateModel")
 class TemplateModelMeta(type):
     """Validates and wires up a TemplateModel subclass at definition time.
 
-    1. Injects ``name`` into all :class:`Field` and :class:`~templex.slot.Slot`
+    1. Injects ``name`` into all :class:`Field` and :class:`~regma.slot.Slot`
        descriptors.
-    2. Normalizes ``template`` (string or :class:`~templex.core.Chain`) and
+    2. Normalizes ``template`` (string or :class:`~regma.core.Chain`) and
        compiles a full regex.
     3. Validates that every Field/Slot appears in the chain (and vice versa).
     4. Validates sub-field accesses (``slot.field``) against the sub-model.

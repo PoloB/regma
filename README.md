@@ -1,19 +1,19 @@
-# templex
+# regma
 
-[![Tests](https://github.com/PoloB/templex/actions/workflows/ci.yml/badge.svg)](https://github.com/PoloB/templex/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/PoloB/templex/graph/badge.svg?token=KNWN8UT6OK)](https://codecov.io/gh/PoloB/templex)
+[![Tests](https://github.com/PoloB/regma/actions/workflows/ci.yml/badge.svg)](https://github.com/PoloB/regma/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/PoloB/regma/graph/badge.svg?token=KNWN8UT6OK)](https://codecov.io/gh/PoloB/regma)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![Checked with mypy](https://www.mypy-lang.org/static/mypy_badge.svg)](https://mypy-lang.org/)
 
 **Object-based, bidirectional string templating with declarative result types.**
 
-templex lets you define string templates using Python objects. Each token
+regma lets you define string templates using Python objects. Each token
 is typed, reusable, and configurable. Parse results are typed model
 instances — not plain dicts.
 
 ```python
-from templex import TemplateModel, Field, Slot
-from templex.field import StrField, ChoiceField
+from regma import TemplateModel, Field, Slot
+from regma.field import StrField, ChoiceField
 
 ASSET_TYPE = ChoiceField("type", choices=["chr", "prp", "env", "veh"])
 ASSET_CODE = StrField("code", pattern=r"[a-z][a-z0-9]+")
@@ -32,14 +32,14 @@ str(result)   # "chr_toto"
 ## Installation
 
 ```bash
-pip install templex
+pip install regma
 ```
 
 Requires Python 3.10+. No dependencies.
 
 ## Documentation
 
-Full documentation at **[your-org.github.io/templex](https://your-org.github.io/templex)**.
+Full documentation at **[your-org.github.io/regma](https://your-org.github.io/regma)**.
 
 ## Features
 
@@ -53,8 +53,8 @@ Full documentation at **[your-org.github.io/templex](https://your-org.github.io/
 ## Quick example
 
 ```python
-from templex import TemplateModel, Field, Slot
-from templex.fields import StrField, ChoiceField
+from regma import TemplateModel, Field, Slot
+from regma.fields import StrField, ChoiceField
 
 GROOM = StrField("groom", pattern=r"[a-z]+")
 
@@ -80,10 +80,10 @@ str(r) == path        # True
 ## Development
 
 ```bash
-git clone https://github.com/your-org/templex
-cd templex
+git clone https://github.com/your-org/regma
+cd regma
 pip install -e ".[dev]"
-pytest tests/ -v --cov=templex
+pytest tests/ -v --cov=regma
 ```
 
 ## License

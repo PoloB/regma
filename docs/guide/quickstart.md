@@ -1,6 +1,6 @@
 # Quickstart
 
-This guide walks through templex's core concepts in 5 minutes.
+This guide walks through regma's core concepts in 5 minutes.
 
 
 ## 1. Declare a model
@@ -8,8 +8,8 @@ This guide walks through templex's core concepts in 5 minutes.
 Subclass `TemplateModel`, declare fields, and write the `template`:
 
 ```python
-from templex import TemplateModel
-from templex import field
+from regma import TemplateModel
+from regma import field
 
 class Asset(TemplateModel):
     type: str = field.choice({'chr', 'prp'})
@@ -36,8 +36,8 @@ Parse and format are always **symmetric**: `str(Model.parse(s)) == s`.
 A `TemplateModel` can be embedded inside another via `field.model`:
 
 ```python
-from templex import TemplateModel
-from templex import field
+from regma import TemplateModel
+from regma import field
 
 
 class GroomPath(TemplateModel):

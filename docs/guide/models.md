@@ -8,8 +8,8 @@ a bidirectional string template.
 ## Declaring a model
 
 ```python
-from templex import TemplateModel
-from templex.field import choice, string
+from regma import TemplateModel
+from regma.field import choice, string
 
 
 class Asset(TemplateModel):

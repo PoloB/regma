@@ -1,7 +1,7 @@
 # TemplateModel
 
-::: templex.model.TemplateModel
+::: regma.model.TemplateModel
 
 ---
 
-::: templex.model.Field
+::: regma.model.Field

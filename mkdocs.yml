@@ -1,8 +1,8 @@
-site_name: templex
+site_name: regma
 site_description: Object-based, bidirectional string templating with declarative result types
-site_url: https://your-org.github.io/templex
-repo_url: https://github.com/your-org/templex
-repo_name: your-org/templex
+site_url: https://your-org.github.io/regma
+repo_url: https://github.com/your-org/regma
+repo_name: your-org/regma
 edit_uri: edit/main/docs/
 
 theme:

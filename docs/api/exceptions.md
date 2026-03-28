@@ -1,11 +1,11 @@
 # Exceptions
 
-::: templex.exceptions.TemplexError
+::: regma.exceptions.regmaError
 
-::: templex.exceptions.ParseError
+::: regma.exceptions.ParseError
 
-::: templex.exceptions.FormatError
+::: regma.exceptions.FormatError
 
-::: templex.exceptions.DefinitionError
+::: regma.exceptions.DefinitionError
 
-::: templex.exceptions.ConsistencyError
+::: regma.exceptions.ConsistencyError

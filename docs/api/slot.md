@@ -1,11 +1,11 @@
 # Slot
 
-::: templex.slot.Slot
+::: regma.slot.Slot
 
 ---
 
-::: templex.slot.BoundSlot
+::: regma.slot.BoundSlot
 
 ---
 
-::: templex.slot.BoundField
+::: regma.slot.BoundField

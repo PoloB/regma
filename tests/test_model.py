@@ -4,12 +4,12 @@ import re
 
 import pytest
 
-from templex import DefinitionError
-from templex import ParseError
-from templex import TemplateModel
-from templex.field import integer
-from templex.field import reference
-from templex.field import string
+from regma import DefinitionError
+from regma import ParseError
+from regma import TemplateModel
+from regma.field import integer
+from regma.field import reference
+from regma.field import string
 from tests.conftest import ComplexModel
 from tests.conftest import FooBarModel
 

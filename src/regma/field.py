@@ -10,14 +10,14 @@ from typing import TypeVar
 
 from typing_extensions import override
 
-from templex.core import AbstractField
-from templex.core import Strictness
-from templex.error import DefinitionError
-from templex.error import ValidationError
+from regma.core import AbstractField
+from regma.core import Strictness
+from regma.error import DefinitionError
+from regma.error import ValidationError
 
 if TYPE_CHECKING:
-    from templex.engine import AbstractRegexEngine
-    from templex.model import TemplateModel
+    from regma.engine import AbstractRegexEngine
+    from regma.model import TemplateModel
 
 T_field = TypeVar("T_field")
 

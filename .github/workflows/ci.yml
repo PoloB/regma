@@ -104,7 +104,7 @@ jobs:
           enable-caching: true
 
       - name: Install dependencies
-        run: uv sync --frozen --group test --group benchmark
+        run: uv sync --frozen --group test --group test
         env:
           UV_PYTHON: "3.13"
 

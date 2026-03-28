@@ -1,6 +1,6 @@
 # String templates
 
-templex supports two equivalent template syntaxes. Both compile to the
+regma supports two equivalent template syntaxes. Both compile to the
 **identical internal `Chain`** — the regex and formatting behaviour are
 identical.
 

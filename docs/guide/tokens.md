@@ -1,6 +1,6 @@
 # Tokens
 
-Tokens are the atomic units of a templex template. Each token defines:
+Tokens are the atomic units of a regma template. Each token defines:
 
 - **Pattern** — the regex it matches during parsing
 - **Parser** — converts the matched string to a typed Python value
@@ -17,7 +17,7 @@ All tokens are **immutable**. Use `.configure()` to create a modified copy.
 Matches a string pattern, returns `str`.
 
 ```python
-from templex.fields import StrField
+from regma.fields import StrField
 
 CODE = StrField("code", pattern=r"[a-z][a-z0-9]+")
 NAME = StrField("name")                              # default: matches [^/]+
@@ -31,7 +31,7 @@ Matches digits, returns `int`. Supports range validation and zero-padded
 formatting.
 
 ```python
-from templex.fields import IntField
+from regma.fields import IntField
 
 VERSION = IntField("version", format="{:03d}")             # → "007"
 PAGE    = IntField("page", min=1, max=999, format="{:03d}")
@@ -42,7 +42,7 @@ PAGE    = IntField("page", min=1, max=999, format="{:03d}")
 Matches one of a fixed set of string values.
 
 ```python
-from templex.fields import ChoiceField
+from regma.fields import ChoiceField
 
 DEPT = ChoiceField("dept", choices=["chr", "prp", "env", "veh"])
 ```
@@ -55,7 +55,7 @@ Defined entirely by a raw regex pattern. Useful for complex patterns that
 don't fit `StrToken`.
 
 ```python
-from templex.fields import RegexField
+from regma.fields import RegexField
 
 SEQUENCE = RegexField("sequence", pattern=r"SQ\d{3}")
 EPISODE  = RegexField("episode",  pattern=r"EP\d{4}")
@@ -100,7 +100,7 @@ VERSION = IntField("version", format="{:03d}", default=1)
 Subclass `Token` and implement `_default_pattern()` and `_parse_value()`:
 
 ```python
-from templex.fields import Field
+from regma.fields import Field
 
 class ShotField(Field):
     def _default_pattern(self) -> str:
