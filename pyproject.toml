@@ -32,13 +32,13 @@ dev = [
     { include-group = "lint" },
 ]
 test = [
-    "pytest",
-    "pytest-cov",
-    "pytest-benchmark",
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
+    "pytest-benchmark>=5.2.3",
 ]
 lint = [
-    "mypy",
-    "ruff",
+    "mypy>=1.19.1",
+    "ruff>=0.15.5",
 ]
 docs = [
     "mkdocs>=1.6",
