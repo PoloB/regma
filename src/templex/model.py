@@ -13,6 +13,7 @@ from typing import TypeVar
 
 from typing_extensions import dataclass_transform
 
+from templex import reference
 from templex.core import AbstractField
 from templex.core import BoundField
 from templex.core import Chain
@@ -210,7 +211,7 @@ class TemplateModelMeta(type):
 
             attr_value = namespace.get(attr)
 
-            if issubclass(hint, TemplateModel):
+            if issubclass(hint, TemplateModel) and attr_value is None:
                 model_field = ModelField(hint)
                 setattr(cls, attr, model_field)
                 new_model_bound_field = BoundField(attr, model_field)
@@ -218,10 +219,14 @@ class TemplateModelMeta(type):
                 fields[attr] = new_model_bound_field
 
             elif isinstance(attr_value, AbstractField):
-                # Separate value fields from model fields
-                new_field = BoundField(attr, attr_value)
-                bound_fields[attr] = BoundField(attr, attr_value)
-                fields[attr] = new_field
+                if isinstance(attr_value, ModelField):
+                    bound_model_field = BoundField(attr, attr_value)
+                    model_fields[attr] = bound_model_field
+                    fields[attr] = bound_model_field
+                else:
+                    new_field = BoundField(attr, attr_value)
+                    bound_fields[attr] = BoundField(attr, attr_value)
+                    fields[attr] = new_field
 
         cls.__fields__ = fields
         cls.__typed_fields__ = bound_fields
@@ -269,7 +274,7 @@ class TemplateModelMeta(type):
         return cls
 
 
-@dataclass_transform(field_specifiers=(string, integer, choice, custom_field))
+@dataclass_transform(field_specifiers=(string, integer, choice, custom_field, reference))
 class TemplateModel(metaclass=TemplateModelMeta):
     r"""Base class for all declarative template models.
 

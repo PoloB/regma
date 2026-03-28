@@ -26,12 +26,20 @@ classifiers = [
 requires-python = ">=3.11"
 dependencies = []
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
-    "pytest>=8.0",
-    "pytest-cov>=5.0",
-    "ruff>=0.4",
-    "mypy>=1.10",
+    { include-group = "test" },
+    { include-group = "lint" },
+    { include-group = "benchmark" },
+]
+test = [
+    "pytest",
+    "pytest-cov",
+    "pytest-benchmark",
+]
+lint = [
+    "mypy",
+    "ruff",
 ]
 docs = [
     "mkdocs>=1.6",
