@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "regma"
-version = "0.1.0"
+version = "0.0.0"
 description = "Object-based, bidirectional string templating with declarative result types"
 readme = "README.md"
 license = { text = "MIT" }
