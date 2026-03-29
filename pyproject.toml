@@ -45,6 +45,11 @@ docs = [
     "mkdocstrings[python]>=0.25",
 ]
 
+[project.optional-dependencies]
+validation = [
+    "greenery>=4.2.2",
+]
+
 [project.urls]
 Homepage = "https://github.com/your-org/regma"
 Repository = "https://github.com/your-org/regma"

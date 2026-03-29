@@ -261,6 +261,15 @@ wheels = [
 ]
 
 [[package]]
+name = "greenery"
+version = "4.2.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a3/84/7ab4ea60ceaf9d5594cc4fe98c585ba7f9137b2203e84ac5b72c3f8a258b/greenery-4.2.2.tar.gz", hash = "sha256:6221d5727d19b4f46fc794635aa00b3dbbab33ed7ff1d686a0011d9197a4b7a0", size = 50696, upload-time = "2024-06-08T12:09:00.185Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/de/12/e604674ba0ce89bb710e60ed57e165e088787216cd7b27302c0cd7e7b095/greenery-4.2.2-py3-none-any.whl", hash = "sha256:df82131963230c9e9ff7d356eed7556626accef52c1c6c2abda8eb57565f7197", size = 51158, upload-time = "2024-06-08T12:08:58.335Z" },
+]
+
+[[package]]
 name = "griffelib"
 version = "2.0.2"
 source = { registry = "https://pypi.org/simple" }
@@ -830,6 +839,71 @@ wheels = [
 ]
 
 [[package]]
+name = "regma"
+source = { editable = "." }
+dependencies = [
+    { name = "typing-extensions" },
+]
+
+[package.optional-dependencies]
+validation = [
+    { name = "greenery" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "pytest-benchmark" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+]
+docs = [
+    { name = "mkdocs" },
+    { name = "mkdocs-material" },
+    { name = "mkdocstrings", extra = ["python"] },
+]
+lint = [
+    { name = "mypy" },
+    { name = "ruff" },
+]
+test = [
+    { name = "pytest" },
+    { name = "pytest-benchmark" },
+    { name = "pytest-cov" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "greenery", marker = "extra == 'validation'", specifier = ">=4.2.2" },
+    { name = "typing-extensions", specifier = ">=4.15.0" },
+]
+provides-extras = ["validation"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "mypy", specifier = ">=1.19.1" },
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-benchmark", specifier = ">=5.2.3" },
+    { name = "pytest-cov", specifier = ">=7.0.0" },
+    { name = "ruff", specifier = ">=0.15.5" },
+]
+docs = [
+    { name = "mkdocs", specifier = ">=1.6" },
+    { name = "mkdocs-material", specifier = ">=9.5" },
+    { name = "mkdocstrings", extras = ["python"], specifier = ">=0.25" },
+]
+lint = [
+    { name = "mypy", specifier = ">=1.19.1" },
+    { name = "ruff", specifier = ">=0.15.5" },
+]
+test = [
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-benchmark", specifier = ">=5.2.3" },
+    { name = "pytest-cov", specifier = ">=7.0.0" },
+]
+
+[[package]]
 name = "requests"
 version = "2.33.0"
 source = { registry = "https://pypi.org/simple" }
@@ -876,63 +950,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68a0e064b6af791aa332cf192da575fd474ed7d6f16a2/six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81", size = 34031, upload-time = "2024-12-04T17:35:28.174Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274", size = 11050, upload-time = "2024-12-04T17:35:26.475Z" },
-]
-
-[[package]]
-name = "regma"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "typing-extensions" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "mypy" },
-    { name = "pytest" },
-    { name = "pytest-benchmark" },
-    { name = "pytest-cov" },
-    { name = "ruff" },
-]
-docs = [
-    { name = "mkdocs" },
-    { name = "mkdocs-material" },
-    { name = "mkdocstrings", extra = ["python"] },
-]
-lint = [
-    { name = "mypy" },
-    { name = "ruff" },
-]
-test = [
-    { name = "pytest" },
-    { name = "pytest-benchmark" },
-    { name = "pytest-cov" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "typing-extensions", specifier = ">=4.15.0" }]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "mypy", specifier = ">=1.19.1" },
-    { name = "pytest", specifier = ">=9.0.2" },
-    { name = "pytest-benchmark", specifier = ">=5.2.3" },
-    { name = "pytest-cov", specifier = ">=7.0.0" },
-    { name = "ruff", specifier = ">=0.15.5" },
-]
-docs = [
-    { name = "mkdocs", specifier = ">=1.6" },
-    { name = "mkdocs-material", specifier = ">=9.5" },
-    { name = "mkdocstrings", extras = ["python"], specifier = ">=0.25" },
-]
-lint = [
-    { name = "mypy", specifier = ">=1.19.1" },
-    { name = "ruff", specifier = ">=0.15.5" },
-]
-test = [
-    { name = "pytest", specifier = ">=9.0.2" },
-    { name = "pytest-benchmark", specifier = ">=5.2.3" },
-    { name = "pytest-cov", specifier = ">=7.0.0" },
 ]
 
 [[package]]
