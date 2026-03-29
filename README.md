@@ -1,5 +1,6 @@
 # regma
 
+![Python](https://img.shields.io/pypi/pyversions/regma)
 [![Tests](https://github.com/PoloB/regma/actions/workflows/ci.yml/badge.svg)](https://github.com/PoloB/regma/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/PoloB/regma/graph/badge.svg?token=qxGwGJRzV6)](https://codecov.io/gh/PoloB/regma)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
