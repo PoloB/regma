@@ -33,6 +33,11 @@ class TemplateNode(abc.ABC):
 class FormatableNode(TemplateNode, abc.ABC):
     """A node that can contribute to formatting a template model."""
 
+    @property
+    @abc.abstractmethod
+    def name(self) -> str:
+        """Return the name of the node."""
+
     @abc.abstractmethod
     def to_chain(self) -> Chain:
         """Return as a chain of inner template nodes."""
@@ -48,6 +53,11 @@ class Chain(FormatableNode):
     def __init__(self, nodes: list[FormatableNode]) -> None:
         """Initialize the chain."""
         self._nodes = nodes
+
+    @property
+    def name(self) -> str:
+        """Return the name of the chain."""
+        return f"chain({'_'.join(node.name for node in self._nodes)})"
 
     @property
     def nodes(self) -> list[FormatableNode]:
@@ -74,6 +84,10 @@ class Separator(FormatableNode):
     def __init__(self, value: str) -> None:
         """Initialize the separator."""
         self.value = value
+
+    def name(self) -> str:
+        """Return the name of the separator."""
+        return f"separator({self.value})"
 
     @override
     def to_regex(self, engine: AbstractRegexEngine) -> str:
@@ -255,7 +269,7 @@ class FieldReference(FormatableNode):
         self._field = target_field
 
     @property
-    def attribute_name(self) -> str:
+    def name(self) -> str:
         """Return the name of the field attribute."""
         return self.__name
 

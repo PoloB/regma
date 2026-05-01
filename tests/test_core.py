@@ -180,7 +180,7 @@ def test_field_reference_init() -> None:
     """A field reference shall init successfully."""
     target_field = StrField(r"\w+")
     field_ref = FieldReference("attr", target_field)
-    assert field_ref.attribute_name == "attr"
+    assert field_ref.name == "attr"
     assert field_ref.target is target_field
 
 

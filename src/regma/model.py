@@ -154,7 +154,7 @@ def _validate_field_references(model_cls: TemplateModelMeta) -> None:
             )
 
     ref_fields = {
-        node.attribute_name
+        node.name
         for node in model_cls.__chain__.nodes
         if isinstance(node, FieldReference)
     }
@@ -200,9 +200,9 @@ class TemplateModelMeta(type):
             return cls
 
         # Create bounded field objects
-        bound_fields: dict[str, BoundField[Any]] = {}
-        model_fields: dict[str, BoundField[ModelField[TemplateModel]]] = {}
-        fields: dict[str, BoundField[Any]] = {}
+        __bound_fields: dict[str, BoundField[Any]] = {}
+        __model_fields: dict[str, BoundField[ModelField[TemplateModel]]] = {}
+        __fields: dict[str, BoundField[Any]] = {}
 
         # First evaluate the model field references by checking annotations
         for attr, hint in typing.get_type_hints(cls).items():
@@ -215,61 +215,61 @@ class TemplateModelMeta(type):
                 model_field = ModelField(hint)
                 setattr(cls, attr, model_field)
                 new_model_bound_field = BoundField(attr, model_field)
-                model_fields[attr] = new_model_bound_field
-                fields[attr] = new_model_bound_field
+                __model_fields[attr] = new_model_bound_field
+                __fields[attr] = new_model_bound_field
 
             elif isinstance(attr_value, AbstractField):
                 if isinstance(attr_value, ModelField):
                     bound_model_field = BoundField(attr, attr_value)
-                    model_fields[attr] = bound_model_field
-                    fields[attr] = bound_model_field
+                    __model_fields[attr] = bound_model_field
+                    __fields[attr] = bound_model_field
                 else:
                     new_field = BoundField(attr, attr_value)
-                    bound_fields[attr] = BoundField(attr, attr_value)
-                    fields[attr] = new_field
+                    __bound_fields[attr] = BoundField(attr, attr_value)
+                    __fields[attr] = new_field
 
-        cls.__fields__ = fields
-        cls.__typed_fields__ = bound_fields
-        cls.__model_fields__ = model_fields
+        cls.__fields__ = __fields
+        cls.__typed_fields__ = __bound_fields
+        cls.__model_fields__ = __model_fields
         _validate_bound_field_names(cls)
 
         # Validate template
-        raw_template: Any = namespace.get("__template__")
-        if raw_template is None:
+        __raw_template: Any = namespace.get("__template__")
+        if __raw_template is None:
             msg = f"{name}: must define a '__template__'"
             raise DefinitionError(msg)
 
-        contents = [namespace, *[b.__dict__ for b in bases]]
+        __contents = [namespace, *[b.__dict__ for b in bases]]
         # Go through all bases to get the delimiter
-        delimiters = (c.get("__delimiter__") for c in contents)
-        delimiter = next(d for d in delimiters if d is not None)
+        __delimiters = (c.get("__delimiter__") for c in __contents)
+        __delimiter = next(d for d in __delimiters if d is not None)
 
-        if not isinstance(delimiter, Delimiter):
+        if not isinstance(__delimiter, Delimiter):
             msg = (
                 f"{name}: __delimiter__ must be a {Delimiter.__name__} instance, "
-                f"got {type(delimiter).__name__!r}"
+                f"got {type(__delimiter).__name__!r}"
             )
             raise DefinitionError(msg)
 
-        chain: Chain = _parse_template(cls)
-        cls.__chain__ = chain
+        __chain: Chain = _parse_template(cls)
+        cls.__chain__ = __chain
         _validate_field_references(cls)
 
         # Go through all bases to get the regex engine
-        regex_engines = (c.get("__regex_engine__") for c in contents)
-        regex_engine_cls = next(d for d in regex_engines if d is not None)
+        __regex_engines = (c.get("__regex_engine__") for c in __contents)
+        __regex_engine_cls = next(d for d in __regex_engines if d is not None)
 
-        if not isinstance(regex_engine_cls, type) or not issubclass(
-            regex_engine_cls, AbstractRegexEngine
+        if not isinstance(__regex_engine_cls, type) or not issubclass(
+            __regex_engine_cls, AbstractRegexEngine
         ):
             msg = (
                 f"{name}: __regex_engine__ must be of type "
                 f"{AbstractRegexEngine.__name__}, "
-                f"got {type(regex_engine_cls).__name__!r}"
+                f"got {type(__regex_engine_cls).__name__!r}"
             )
             raise DefinitionError(msg)
 
-        cls.__regex__ = cls.__chain__.to_regex(regex_engine_cls())
+        cls.__regex__ = cls.__chain__.to_regex(__regex_engine_cls())
 
         return cls
 

@@ -24,13 +24,11 @@ Requires: ``pip install greenery``
 
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass
+import dataclasses
 from typing import TYPE_CHECKING
 
-from greenery.fsm import AlphaType
-from greenery.fsm import StateType
-from greenery.fsm import crawl
+from regma.core import FieldReference
+from regma.core import Separator
 
 try:
     import greenery
@@ -42,8 +40,10 @@ except ImportError as exc:
 from regma.engine import AbstractRegexEngine
 
 if TYPE_CHECKING:
-    from regma import TemplateModel
+    from collections.abc import Iterator
+
     from regma import TemplateNode
+    from regma.core import Chain
 
 
 class ValidationRegexEngine(AbstractRegexEngine):
@@ -58,7 +58,7 @@ class ValidationRegexEngine(AbstractRegexEngine):
         return template_node.to_regex(self)
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class LanguageProperties:
     """Properties of the full concatenated language L(P₁ · ... · Pₙ).
 
@@ -74,7 +74,7 @@ class LanguageProperties:
     examples: set[str]
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class AmbiguityResult:
     """Result of the bijectivity check.
 
@@ -92,7 +92,7 @@ class AmbiguityResult:
     split_point: int | None = None
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class ValidationReport:
     """Complete validation report for a template.
 
@@ -107,29 +107,6 @@ class ValidationReport:
     def is_valid(self) -> bool:
         """Return whether the template is valid."""
         return self.ambiguity.is_bijective
-
-
-def validate_template(
-    model_cls: type[TemplateModel], max_examples: int = 5
-) -> ValidationReport:
-    """Run all three validation checks on the given model class.
-
-    It checks the following:
-    - nonempty template pattern
-    - cardinality of the pattern (how many different strings can it match)
-    - pattern bijectivity
-    """
-    patterns = [n.to_regex(ValidationRegexEngine()) for n in model_cls.__chain__.nodes]
-    full_fsm = greenery.parse("".join(patterns)).to_fsm()
-
-    # Compute pattern properties
-    language = _check_language(full_fsm, max_examples)
-
-    # Check bijectivity
-    fsms = [greenery.parse(p).to_fsm() for p in patterns]
-    ambiguity = _check_bijectivity(fsms)
-
-    return ValidationReport(language=language, ambiguity=ambiguity)
 
 
 def _check_language(full_fsm: greenery.Fsm, max_examples: int) -> LanguageProperties:
@@ -153,208 +130,139 @@ def _check_language(full_fsm: greenery.Fsm, max_examples: int) -> LanguageProper
         is_finite=is_finite, cardinality=cardinality, examples=examples
     )
 
+@dataclasses.dataclass(frozen=True)
+class FsmNode:
+    """A finite state machine object corresponding to a template node."""
 
-def right_quotient(m1: greenery.Fsm, m2: greenery.Fsm) -> greenery.Fsm:
-    """L(m1) / L(m2) = { w | ∃x ∈ L2, wx ∈ L1 }"""
-    m1, m2 = greenery.fsm.unify_alphabets([m1, m2])
-
-    def follow(q1, symbol):
-        return m1.map[q1][symbol]
-
-    def final(q1):
-        return not (
-            greenery.Fsm(
-                alphabet=m1.alphabet,
-                states=m1.states,
-                initial=q1,
-                finals=m1.finals,
-                map=m1.map,
-            )
-            & m2
-        ).empty()
-
-    return greenery.fsm.crawl(m1.alphabet, m1.initial, final, follow)
+    node: TemplateNode
+    fsm: greenery.Fsm
 
 
-def left_quotient(m1: greenery.Fsm, m2: greenery.Fsm) -> greenery.Fsm:
-    """L(m1) \\ L(m2) = { w | ∃x ∈ L1, xw ∈ L2 }"""
-    m1, m2 = greenery.fsm.unify_alphabets([m1, m2])
+@dataclasses.dataclass
+class FsmFrontierDecomposition:
+    frontier: FsmFieldFrontier
+    suffix: greenery.Fsm
+    prefix: greenery.Fsm
+    intersection: greenery.Fsm
 
-    reachable_via_l1: set[int] = set()
+    def is_colliding(self) -> bool:
+        return not (self.intersection - greenery.EPSILON).empty()
 
-    def product_follow(state, symbol):
-        q1, q2 = state
-        return (m1.map[q1][symbol], m2.map[q2][symbol])
-
-    def product_final(state):
-        q1, q2 = state
-        if q1 in m1.finals:
-            reachable_via_l1.add(q2)
-        return False
-
-    greenery.fsm.crawl(
-        m1.alphabet, (m1.initial, m2.initial), product_final, product_follow
-    )
-
-    def follow(states, symbol):
-        return frozenset(m2.map[q][symbol] for q in states)
-
-    def final(states):
-        return bool(states & m2.finals)
-
-    return greenery.fsm.crawl(m2.alphabet, frozenset(reachable_via_l1), final, follow)
+    def generate_example(self) -> str:
+        trim_prefix = _trim_prefix(self.frontier.left.fsm)
+        trim_suffix = _trim_suffix(self.frontier.right.fsm)
+        ambigious_fsm = trim_prefix + self.intersection + trim_suffix
+        return next(ambigious_fsm.strings([]), "")
 
 
-def _right_reminder(fsm: greenery.Fsm) -> greenery.Fsm:
-    """Return the right reminder of the given fsm.
+class FsmFieldFrontier:
+    def __init__(self, fsm_left: FsmNode, fsm_right: FsmNode):
+        self._left = fsm_left
+        self._right = fsm_right
 
-    The right reminder are all the words constructed from a final state of
-    the fsm that are still a word of the fsm.
+    @property
+    def left(self) -> FsmNode:
+        return self._left
 
-    For example, the fsm of the regex ab* is b*
-    """
-    alphabet = fsm.alphabet
+    @property
+    def right(self) -> FsmNode:
+        return self._right
 
-    initial = frozenset(fsm.finals)
-
-    # Find every possible way to reach the current state-set
-    # using this symbol.
-    def follow(current: frozenset[StateType], symbol: AlphaType) -> frozenset[StateType]:
-        return frozenset(
-            [
-                prev
-                for prev in fsm.map
-                for state in current
-                if fsm.map[prev][symbol] == state
-            ]
-        )
-
-    # A state-set is final if the initial state is in it.
-    def final(state: frozenset[StateType]) -> bool:
-        return bool(fsm.finals.intersection(state))
-
-    return crawl(alphabet, initial, final, follow).reduce()
+    def decompose(self) -> FsmFrontierDecomposition:
+        fsm1_suffix = _compute_suffix(self._left.fsm)
+        fsm2_prefix = _compute_prefix(self._right.fsm)
+        intersection = fsm1_suffix.intersection(fsm2_prefix)
+        return FsmFrontierDecomposition(self, fsm1_suffix, fsm2_prefix, intersection)
 
 
-def _left_reminder(fsm: greenery.Fsm) -> greenery.Fsm:
-    """Return the left reminder of the given fsm.
+class CollisionResult:
+    def __init__(self, token_decompositions: list[FsmFrontierDecomposition]) -> None:
+        self._token_decompositions = token_decompositions
 
-    The left reminder are all the words constructed from an initial state of
-    the fsm that are lead to an initial state of the fsm.
+    def is_valid(self) -> bool:
+        # Check each decomposition
+        return all(not decomp.is_colliding() for decomp in self._token_decompositions)
 
-    For example, the fsm of the regex b*a is b*
-    """
-    alphabet = fsm.alphabet
-
-    # Find every possible way to reach the current state-set
-    # using this symbol.
-    def follow(current: int, symbol: greenery.Charclass) -> int:
-        return fsm.map[current][symbol]
-
-    # A state-set is final if the initial state is in it.
-    def final(state: int) -> bool:
-        return fsm.initial == state
-
-    return crawl(alphabet, fsm.initial, final, follow).reduce()
+    def generate_examples(self) -> Iterator[str]:
+        for decomp in self._token_decompositions:
+            if decomp.is_colliding():
+                yield decomp.generate_example()
 
 
-def _check_bijectivity(fsms: list[greenery.Fsm]) -> AmbiguityResult:
-    """Faithful Sardinas-Patterson algorithm over DFAs.
+class FsmChain:
+    @classmethod
+    def from_chain(
+        cls, chain: Chain, engine: AbstractRegexEngine | None = None
+    ) -> FsmChain:
+        """Create a FsmChain from a template chain."""
+        if engine is None:
+            engine = ValidationRegexEngine()
 
-    For each split boundary i (between node i and i+1), computes:
+        nodes = chain.nodes
 
-        C₁(i) = prefix(i) / prefix(i)   — self-overlap suffixes of the prefix
+        fsm_nodes: list[FsmNode] = []
 
-    where prefix(i) = L(P₁ · ... · Pᵢ₊₁).
+        for node in nodes:
+            regex = engine.build("", node)
+            fsm = greenery.parse(regex).to_fsm()
+            fsm_nodes.append(FsmNode(node, fsm))
 
-    C₁(i) is the set of non-empty strings by which the prefix can
-    over-consume relative to a valid split.  Ambiguity at boundary i
-    exists iff any string in C₁(i) can start a valid suffix match:
+        return cls(fsm_nodes)
 
-        right_quotient(suffix(i), C₁(i)) ≠ ∅
+    def __init__(self, fsm_nodes: list[FsmNode]) -> None:
+        """Initialize the chain of fsms."""
+        self._nodes = fsm_nodes
 
-    where suffix(i) = L(Pᵢ₊₂ · ... · Pₙ).
+    def iter_fsm_nodes(self) -> Iterator[FsmNode]:
+        """Iterate over the fsm tokens in the model."""
+        yield from self._nodes
 
-    If the above is non-empty, a witness string is reconstructed and
-    returned.
+    def get_collision_result(self) -> CollisionResult:
 
-    Args:
-        fsms: Individual FSMs for each pattern node, in order.
+        # Only keep field reference and separators
+        nodes = list(self._nodes)
+        if not nodes:
+            return CollisionResult([])
 
-    Returns:
-        ambiguity result
-    """
-    if len(fsms) <= 1:
-        return AmbiguityResult(is_bijective=True)
+        # Remove elements until we fall onto a FieldReference
+        first_node = nodes[0]
 
-    # sigma_plus: any non-empty string — used to exclude ε from C₁
-    # ε in C₁ is trivial (every string is a "prefix of itself with ε left over")
-    # and does not indicate ambiguity.
-    sigma_plus = greenery.parse(".+").to_fsm()
+        while not isinstance(first_node.node, FieldReference):
+            nodes.pop(0)
+            first_node = nodes[0]
 
-    # Build prefix FSMs incrementally
-    prefix_fsm = fsms[0]
+        if not nodes:
+            return CollisionResult([])
 
-    for i in range(len(fsms) - 1):
-        if i > 0:
-            prefix_fsm = prefix_fsm + fsms[i]
+        last_node = nodes[-1]
 
-        # suffix_fsm = L(Pᵢ₊₁ · ... · Pₙ)
-        suffix_fsm = fsms[i + 1]
-        for fsm in fsms[i + 2 :]:
-            suffix_fsm = suffix_fsm + fsm
+        while not isinstance(last_node.node, FieldReference):
+            nodes.pop(-1)
+            last_node = nodes[-1]
 
-        # C₁(i): non-empty self-overlap suffixes of prefix
-        # = { s ≠ ε : ∃ u ∈ L(prefix), u·s ∈ L(prefix) }
-        c1 = right_quotient(prefix_fsm, prefix_fsm)
-        c1_nonempty = c1 & sigma_plus
+        if not nodes:
+            return CollisionResult([])
 
-        if c1_nonempty.empty():
-            # Prefix is suffix-free at this boundary — unambiguous
-            continue
+        current_node = nodes[0]
+        current_fsm = current_node.fsm
 
-        # Check: can any string in C₁ start a valid suffix match?
-        # right_quotient(suffix_fsm, c1_nonempty) = { t : ∃ s ∈ C₁, s·t ∈ L(suffix) }
-        # If non-empty: u·s ∈ prefix (long split) AND s·t ∈ suffix (short split's suffix)
-        # where u ∈ prefix AND u·s ∈ prefix — genuine ambiguity.
-        reachable = right_quotient(suffix_fsm, c1_nonempty)
+        # Create frontiers between FieldReference
+        frontier_nodes: list[tuple[FsmNode, FsmNode]] = []
 
-        if not reachable.empty():
-            witness = _reconstruct_witness(
-                prefix_fsm=prefix_fsm, c1_nonempty=c1_nonempty, reachable=reachable
-            )
-            return AmbiguityResult(is_bijective=False, witness=witness, split_point=i)
+        for node in nodes[1:]:
+            if isinstance(node.node, Separator):
+                current_fsm = current_fsm.concatenate(node.fsm)
+                continue
 
-    return AmbiguityResult(is_bijective=True)
+            if isinstance(node.node, FieldReference):
+                # Store the current fsm
+                frontier_nodes.append((FsmNode(current_node.node, current_fsm), node))
+                current_node = node
+                current_fsm = current_node.fsm
 
+        frontier_decompositions: list[FsmFrontierDecomposition] = []
 
-def _reconstruct_witness(
-    prefix_fsm: greenery.Fsm, c1_nonempty: greenery.Fsm, reachable: greenery.Fsm
-) -> str:
-    """Reconstruct a concrete witness string for the ambiguity.
+        for fsm1, fsm2 in frontier_nodes:
+            frontier_decompositions.append(FsmFieldFrontier(fsm1, fsm2).decompose())
 
-    Finds the shortest u·s·t where:
-    - u·s ∈ L(prefix)   (long-split prefix)
-    - u   ∈ L(prefix)   (short-split prefix — proper prefix of u·s)
-    - s   ∈ C₁          (the over-consumed amount, s ≠ ε)
-    - s·t ∈ L(suffix)   (short-split suffix)
-    - t   ∈ L(suffix)   (long-split suffix, may be ε)
-
-    Strategy:
-    1. Find the shortest s ∈ C₁.
-    2. Find the shortest t such that s·t ∈ L(suffix) — that's t ∈ reachable.
-    3. Find the shortest u such that u·s ∈ L(prefix)
-       = u ∈ right_quotient(prefix, {s}).
-    """
-    # Step 1: shortest s in C₁
-    s = next(c1_nonempty.strings([]), "")
-
-    # Step 2: shortest t in reachable (may be empty string "")
-    t = next(reachable.strings([]), "")
-
-    # Step 3: shortest u such that u·s ∈ L(prefix)
-    s_literal_fsm = greenery.parse(re.escape(s)).to_fsm()
-    u_language = right_quotient(prefix_fsm, s_literal_fsm)
-
-    u = "" if u_language.accepts("") else next(u_language.strings([]), "")
-    return u + s + t
+        return CollisionResult(frontier_decompositions)
