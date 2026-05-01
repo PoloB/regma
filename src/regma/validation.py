@@ -24,10 +24,13 @@ Requires: ``pip install greenery``
 
 from __future__ import annotations
 
-import collections
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+
+from greenery.fsm import AlphaType
+from greenery.fsm import StateType
+from greenery.fsm import crawl
 
 try:
     import greenery
@@ -151,103 +154,108 @@ def _check_language(full_fsm: greenery.Fsm, max_examples: int) -> LanguageProper
     )
 
 
-def _right_quotient(fsm_b: greenery.Fsm, fsm_a: greenery.Fsm) -> greenery.Fsm:
-    """Compute the right quotient B / A = { s : ∃ u ∈ L(A), u·s ∈ L(B) }.
+def right_quotient(m1: greenery.Fsm, m2: greenery.Fsm) -> greenery.Fsm:
+    """L(m1) / L(m2) = { w | ∃x ∈ L2, wx ∈ L1 }"""
+    m1, m2 = greenery.fsm.unify_alphabets([m1, m2])
 
-    This is the set of strings that can *complete* a string in L(A) to
-    reach a string in L(B).
+    def follow(q1, symbol):
+        return m1.map[q1][symbol]
 
-    When A = B this gives the self-overlap suffixes — strings s such that
-    some u ∈ L(A) can be extended by s and still land in L(A).  These are
-    exactly the "dangling suffixes" of the Sardinas-Patterson algorithm.
+    def final(q1):
+        return not (
+            greenery.Fsm(
+                alphabet=m1.alphabet,
+                states=m1.states,
+                initial=q1,
+                finals=m1.finals,
+                map=m1.map,
+            )
+            & m2
+        ).empty()
 
-    We use ``greenery.fsm.unify_alphabets([fsm_a, fsm_b])`` — a public
-    module-level function — to repartition both FSMs onto a common
-    alphabet.  After unification every charclass in A's transition map
-    corresponds exactly to a charclass in B's transition map, so we can
-    walk both state graphs in parallel via a BFS over ``(state_a, state_b)``
-    pairs without any character-level guessing.
+    return greenery.fsm.crawl(m1.alphabet, m1.initial, final, follow)
 
-    Whenever A is in an accepting state during the BFS, B's current state
-    is recorded as a valid "quotient start state" — i.e. B can accept
-    strings from there.  The quotient FSM is then built as a new Fsm
-    with those start states encoded via the union operator ``|``.
 
-    Args:
-        fsm_b : The language we want suffixes of.
-        fsm_a : The language whose strings are the consumed prefixes.
+def left_quotient(m1: greenery.Fsm, m2: greenery.Fsm) -> greenery.Fsm:
+    """L(m1) \\ L(m2) = { w | ∃x ∈ L1, xw ∈ L2 }"""
+    m1, m2 = greenery.fsm.unify_alphabets([m1, m2])
 
-    Returns:
-        An FSM accepting exactly B / A.
+    reachable_via_l1: set[int] = set()
+
+    def product_follow(state, symbol):
+        q1, q2 = state
+        return (m1.map[q1][symbol], m2.map[q2][symbol])
+
+    def product_final(state):
+        q1, q2 = state
+        if q1 in m1.finals:
+            reachable_via_l1.add(q2)
+        return False
+
+    greenery.fsm.crawl(
+        m1.alphabet, (m1.initial, m2.initial), product_final, product_follow
+    )
+
+    def follow(states, symbol):
+        return frozenset(m2.map[q][symbol] for q in states)
+
+    def final(states):
+        return bool(states & m2.finals)
+
+    return greenery.fsm.crawl(m2.alphabet, frozenset(reachable_via_l1), final, follow)
+
+
+def _right_reminder(fsm: greenery.Fsm) -> greenery.Fsm:
+    """Return the right reminder of the given fsm.
+
+    The right reminder are all the words constructed from a final state of
+    the fsm that are still a word of the fsm.
+
+    For example, the fsm of the regex ab* is b*
     """
-    # Unify alphabets so both FSMs share the same charclass partition.
-    # After this, every transition charclass in fsm_a also appears in
-    # fsm_b and vice versa — the BFS can walk both maps in lockstep.
-    fsm_a, fsm_b = greenery.fsm.unify_alphabets([fsm_a, fsm_b])
+    alphabet = fsm.alphabet
 
-    # Product BFS over (state_a, state_b) pairs.
-    # Whenever state_a is an A-accepting state, record state_b as a
-    # valid initial state for the quotient FSM.
-    visited: set[tuple[int, int]] = set()
-    queue: collections.deque[tuple[int, int]] = collections.deque()
+    initial = frozenset(fsm.finals)
 
-    start = (fsm_a.initial, fsm_b.initial)
-    queue.append(start)
-    visited.add(start)
-
-    quotient_initials: set[int] = set()
-
-    # ε ∈ L(A) → B's initial state is immediately a quotient start
-    if fsm_a.initial in fsm_a.finals:
-        quotient_initials.add(fsm_b.initial)
-
-    while queue:
-        state_a, state_b = queue.popleft()
-        trans_a = fsm_a.map.get(state_a, {})
-        trans_b = fsm_b.map.get(state_b, {})
-
-        # After unify_alphabets, both maps share the same charclasses
-        for charclass in trans_a:
-            next_a = trans_a[charclass]
-            next_b = trans_b.get(charclass)  # None if b has no transition here
-            if next_b is None:
-                continue
-            pair = (next_a, next_b)
-            if pair not in visited:
-                visited.add(pair)
-                queue.append(pair)
-            if next_a in fsm_a.finals:
-                quotient_initials.add(next_b)
-
-    if not quotient_initials:
-        # No string in L(A) drives B to any reachable state → quotient empty
-        return greenery.Fsm(
-            alphabet=fsm_b.alphabet,
-            states=frozenset({0}),
-            initial=0,
-            finals=frozenset(),
-            map={},
+    # Find every possible way to reach the current state-set
+    # using this symbol.
+    def follow(current: frozenset[StateType], symbol: AlphaType) -> frozenset[StateType]:
+        return frozenset(
+            [
+                prev
+                for prev in fsm.map
+                for state in current
+                if fsm.map[prev][symbol] == state
+            ]
         )
 
-    # Build quotient FSM as the union of copies of fsm_b, one per
-    # quotient initial state.  Each copy is fsm_b with its initial
-    # state replaced — greenery's Fsm is a frozen dataclass so we
-    # reconstruct it.  The union (|) handles alphabet compatibility
-    # automatically since all copies share the same alphabet.
-    def _with_initial(fsm: greenery.Fsm, initial: int) -> greenery.Fsm:
-        return greenery.Fsm(
-            alphabet=fsm.alphabet,
-            states=fsm.states,
-            initial=initial,
-            finals=fsm.finals,
-            map=fsm.map,
-        )
+    # A state-set is final if the initial state is in it.
+    def final(state: frozenset[StateType]) -> bool:
+        return bool(fsm.finals.intersection(state))
 
-    parts = [_with_initial(fsm_b, q) for q in quotient_initials]
-    result = parts[0]
-    for part in parts[1:]:
-        result = result | part
-    return result
+    return crawl(alphabet, initial, final, follow).reduce()
+
+
+def _left_reminder(fsm: greenery.Fsm) -> greenery.Fsm:
+    """Return the left reminder of the given fsm.
+
+    The left reminder are all the words constructed from an initial state of
+    the fsm that are lead to an initial state of the fsm.
+
+    For example, the fsm of the regex b*a is b*
+    """
+    alphabet = fsm.alphabet
+
+    # Find every possible way to reach the current state-set
+    # using this symbol.
+    def follow(current: int, symbol: greenery.Charclass) -> int:
+        return fsm.map[current][symbol]
+
+    # A state-set is final if the initial state is in it.
+    def final(state: int) -> bool:
+        return fsm.initial == state
+
+    return crawl(alphabet, fsm.initial, final, follow).reduce()
 
 
 def _check_bijectivity(fsms: list[greenery.Fsm]) -> AmbiguityResult:
@@ -298,7 +306,7 @@ def _check_bijectivity(fsms: list[greenery.Fsm]) -> AmbiguityResult:
 
         # C₁(i): non-empty self-overlap suffixes of prefix
         # = { s ≠ ε : ∃ u ∈ L(prefix), u·s ∈ L(prefix) }
-        c1 = _right_quotient(prefix_fsm, prefix_fsm)
+        c1 = right_quotient(prefix_fsm, prefix_fsm)
         c1_nonempty = c1 & sigma_plus
 
         if c1_nonempty.empty():
@@ -309,7 +317,7 @@ def _check_bijectivity(fsms: list[greenery.Fsm]) -> AmbiguityResult:
         # right_quotient(suffix_fsm, c1_nonempty) = { t : ∃ s ∈ C₁, s·t ∈ L(suffix) }
         # If non-empty: u·s ∈ prefix (long split) AND s·t ∈ suffix (short split's suffix)
         # where u ∈ prefix AND u·s ∈ prefix — genuine ambiguity.
-        reachable = _right_quotient(suffix_fsm, c1_nonempty)
+        reachable = right_quotient(suffix_fsm, c1_nonempty)
 
         if not reachable.empty():
             witness = _reconstruct_witness(
@@ -346,7 +354,7 @@ def _reconstruct_witness(
 
     # Step 3: shortest u such that u·s ∈ L(prefix)
     s_literal_fsm = greenery.parse(re.escape(s)).to_fsm()
-    u_language = _right_quotient(prefix_fsm, s_literal_fsm)
+    u_language = right_quotient(prefix_fsm, s_literal_fsm)
 
     u = "" if u_language.accepts("") else next(u_language.strings([]), "")
     return u + s + t
