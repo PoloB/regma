@@ -130,6 +130,117 @@ def _check_language(full_fsm: greenery.Fsm, max_examples: int) -> LanguageProper
         is_finite=is_finite, cardinality=cardinality, examples=examples
     )
 
+
+def _left_reminder(fsm: greenery.Fsm) -> greenery.Fsm:
+    """Return the left reminder of the given fsm.
+
+    The left reminder are all the words constructed from an initial state of
+    the fsm that are lead to an initial state of the fsm.
+
+    For example, the fsm of the regex b*a is b*
+    """
+    alphabet = fsm.alphabet
+
+    initial = frozenset(fsm.finals)
+
+    # Find every possible way to reach the current state-set
+    # using this symbol.
+    def follow(
+        current: frozenset[int], symbol: greenery.Charclass
+    ) -> frozenset[greenery.fsm.StateType]:
+        return frozenset(
+            [
+                prev
+                for prev in fsm.map
+                for state in current
+                if fsm.map[prev][symbol] == state
+            ]
+        )
+
+    # A state-set is final if the initial state is in it.
+    def final(state: frozenset[int]) -> bool:
+        return bool(fsm.finals.intersection(state))
+
+    return greenery.fsm.crawl(alphabet, initial, final, follow).reduce()
+
+
+def _right_reminder(fsm: greenery.Fsm) -> greenery.Fsm:
+    """Return the right reminder of the given fsm.
+
+    The right reminder are all the words constructed from a final state of
+    the fsm that are still a word of the fsm.
+
+    For example, the fsm of the regex ab* is b*
+    """
+    return _left_reminder(fsm).reversed()
+
+
+def _trim_right_reminder(fsm: greenery.Fsm) -> greenery.Fsm:
+    """Return the fsm that removes all the possible right reminders of the given fsm.
+
+    For example, trimmed right reminder of abc* is ab.
+    """
+    alphabet = fsm.alphabet
+    finals = fsm.finals
+
+    # Define an ending state
+    end_state = len(fsm.states)
+
+    # Find every possible way to reach the current state-set
+    # using this symbol.
+    def follow(current: int, symbol: greenery.Charclass) -> int:
+        if current in finals:
+            return end_state
+        if current == end_state:
+            return end_state
+        return fsm.map[current][symbol]
+
+    # A state-set is final if the initial state is in it.
+    def final(state: int) -> bool:
+        return state in finals
+
+    return greenery.fsm.crawl(alphabet, fsm.initial, final, follow).reduce()
+
+
+def _trim_left_reminder(fsm: greenery.Fsm) -> greenery.Fsm:
+    """Return the fsm that removes all the possible left reminders of the given fsm.
+
+    For example, trimmed right reminder of a*bc is bc.
+    """
+    alphabet = fsm.alphabet
+
+    initial_state = fsm.initial
+
+    ending_state = frozenset([len(fsm.states)])
+
+    # Find every possible way to reach the current state-set
+    # using this symbol.
+    def follow(
+        current: frozenset[greenery.fsm.StateType], symbol: greenery.fsm.AlphaType
+    ) -> frozenset[greenery.fsm.StateType]:
+
+        if initial_state in current:
+            return ending_state
+
+        if current == ending_state:
+            return ending_state
+
+        return frozenset(
+            [
+                prev
+                for prev in fsm.map
+                for state in current
+                if fsm.map[prev][symbol] == state
+            ]
+        )
+
+    # A state-set is final if the initial state is in it.
+    def final(state: frozenset[greenery.fsm.StateType]) -> bool:
+        return fsm.initial in state
+
+    return greenery.fsm.crawl(alphabet, frozenset(fsm.finals), final, follow).reduce()
+
+
 @dataclasses.dataclass(frozen=True)
 class FsmNode:
     """A finite state machine object corresponding to a template node."""
@@ -146,11 +257,11 @@ class FsmFrontierDecomposition:
     intersection: greenery.Fsm
 
     def is_colliding(self) -> bool:
-        return not (self.intersection - greenery.EPSILON).empty()
+        return not self.intersection.empty()
 
     def generate_example(self) -> str:
-        trim_prefix = _trim_prefix(self.frontier.left.fsm)
-        trim_suffix = _trim_suffix(self.frontier.right.fsm)
+        trim_prefix = _trim_right_reminder(self.frontier.left.fsm)
+        trim_suffix = _trim_left_reminder(self.frontier.right.fsm)
         ambigious_fsm = trim_prefix + self.intersection + trim_suffix
         return next(ambigious_fsm.strings([]), "")
 
@@ -169,9 +280,9 @@ class FsmFieldFrontier:
         return self._right
 
     def decompose(self) -> FsmFrontierDecomposition:
-        fsm1_suffix = _compute_suffix(self._left.fsm)
-        fsm2_prefix = _compute_prefix(self._right.fsm)
-        intersection = fsm1_suffix.intersection(fsm2_prefix)
+        fsm1_suffix = _right_reminder(self._left.fsm)
+        fsm2_prefix = _left_reminder(self._right.fsm)
+        intersection = (fsm1_suffix.intersection(fsm2_prefix) - greenery.EPSILON)
         return FsmFrontierDecomposition(self, fsm1_suffix, fsm2_prefix, intersection)
 
 

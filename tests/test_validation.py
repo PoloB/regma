@@ -52,4 +52,4 @@ def test_non_bijective_model_fails() -> None:
 
     fsm_chain = FsmChain.from_chain(NonBijectiveModel.__chain__)
     result = fsm_chain.get_collision_result()
-    assert result.is_valid()
+    assert not result.is_valid()
