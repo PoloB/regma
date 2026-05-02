@@ -12,8 +12,8 @@ from tests.conftest import SimpleTestModel
 def test_simple_model_is_valid() -> None:
     """Make sure the simple test model is valid."""
     fsm_chain = FsmChain.from_chain(SimpleTestModel.__chain__)
-    result = fsm_chain.get_collision_result()
-    assert result.is_valid()
+    result = fsm_chain.compute_collision()
+    assert result.has_collision()
 
 
 def test_finite_model() -> None:
@@ -25,8 +25,8 @@ def test_finite_model() -> None:
         bar: str = choice(["up", "down"])
 
     fsm_chain = FsmChain.from_chain(FiniteModel.__chain__)
-    result = fsm_chain.get_collision_result()
-    assert result.is_valid()
+    result = fsm_chain.compute_collision()
+    assert result.has_collision()
 
 
 def test_non_bijective_model_succeed() -> None:
@@ -38,8 +38,8 @@ def test_non_bijective_model_succeed() -> None:
         bar: str = string(r"\d+")
 
     fsm_chain = FsmChain.from_chain(NonBijectiveModel.__chain__)
-    result = fsm_chain.get_collision_result()
-    assert result.is_valid()
+    result = fsm_chain.compute_collision()
+    assert result.has_collision()
 
 
 def test_non_bijective_model_fails() -> None:
@@ -51,5 +51,5 @@ def test_non_bijective_model_fails() -> None:
         bar: str = string(r".+")
 
     fsm_chain = FsmChain.from_chain(NonBijectiveModel.__chain__)
-    result = fsm_chain.get_collision_result()
-    assert not result.is_valid()
+    result = fsm_chain.compute_collision()
+    assert not result.has_collision()

@@ -104,4 +104,8 @@ src = ["src", "tests"]
 
 [tool.mypy]
 strict = true
-ignore_missing_imports = true
+# ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["greenery.*"]
+follow_untyped_imports = true

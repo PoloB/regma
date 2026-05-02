@@ -85,6 +85,7 @@ class Separator(FormatableNode):
         """Initialize the separator."""
         self.value = value
 
+    @property
     def name(self) -> str:
         """Return the name of the separator."""
         return f"separator({self.value})"

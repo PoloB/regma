@@ -1,25 +1,6 @@
-"""Formal validation of template bijectivity using finite automata.
+"""Module providing validation routines for regma templates.
 
-Given a template composed of N pattern nodes, this module answers three
-questions — all at class definition time, zero cost at parse/format time:
-
-1. **Empty language** — does the template match *any* string at all?
-   Formally: is L(P₁ · P₂ · ... · Pₙ) = ∅ ?
-
-2. **Finite language** — does the template match only a bounded set of
-   strings? Useful for documentation and exhaustive testing.
-
-3. **Bijectivity** — is T⁻¹ ∘ T = id ?  i.e. does formatting then parsing
-   always recover the original tokens?  Formally: does the concatenation
-   L(P₁ · ... · Pₙ) have a unique factorization for every string in it?
-   Detected via a generalization of the Sardinas-Patterson algorithm over
-   finite automata.
-
-All three checks use `greenery` (optional dependency) which represents
-regular languages as DFAs and supports intersection, concatenation, union,
-complement, emptiness, and string enumeration.
-
-Requires: ``pip install greenery``
+The module provide the following functions
 """
 
 from __future__ import annotations
@@ -56,79 +37,6 @@ class ValidationRegexEngine(AbstractRegexEngine):
     def build(self, _: str, template_node: TemplateNode) -> str:
         """Build the regex for the given field name and pattern."""
         return template_node.to_regex(self)
-
-
-@dataclasses.dataclass(frozen=True)
-class LanguageProperties:
-    """Properties of the full concatenated language L(P₁ · ... · Pₙ).
-
-    Attributes:
-    is_empty: True if no string can ever match the template.
-    is_finite: True if only a bounded number of strings match.
-    cardinality: Exact count of matching strings when finite, None when infinite.
-    examples: A small sample of accepted strings (empty if language is empty).
-    """
-
-    is_finite: bool
-    cardinality: int | None
-    examples: set[str]
-
-
-@dataclasses.dataclass(frozen=True)
-class AmbiguityResult:
-    """Result of the bijectivity check.
-
-    Attributes:
-    is_bijective: True if T⁻¹ ∘ T = id is guaranteed — every formatted string parses
-        back to exactly the original tokens.
-    witness: A concrete string that admits two different parses, when ``is_bijective``
-        is False.  None when bijective.
-    split_point: Index of the node *after* which the ambiguous split occurs,
-        when ``is_bijective`` is False.  None when bijective.
-    """
-
-    is_bijective: bool
-    witness: str | None = None
-    split_point: int | None = None
-
-
-@dataclasses.dataclass(frozen=True)
-class ValidationReport:
-    """Complete validation report for a template.
-
-    Attributes:
-    language: Properties of the full concatenated language.
-    ambiguity: Result of the bijectivity check.
-    """
-
-    language: LanguageProperties
-    ambiguity: AmbiguityResult
-
-    def is_valid(self) -> bool:
-        """Return whether the template is valid."""
-        return self.ambiguity.is_bijective
-
-
-def _check_language(full_fsm: greenery.Fsm, max_examples: int) -> LanguageProperties:
-    """Compute emptiness, finiteness, cardinality, and example strings."""
-    # Finiteness: len() raises OverflowError when infinite
-    try:
-        cardinality: int | None = len(full_fsm)
-        is_finite = True
-    except OverflowError:
-        cardinality = None
-        is_finite = False
-
-    # Collect a small sample of accepted strings
-    examples: set[str] = set()
-    for s in full_fsm.strings([]):
-        examples.add(s)
-        if len(examples) >= max_examples:
-            break
-
-    return LanguageProperties(
-        is_finite=is_finite, cardinality=cardinality, examples=examples
-    )
 
 
 def _left_reminder(fsm: greenery.Fsm) -> greenery.Fsm:
@@ -251,72 +159,100 @@ class FsmNode:
 
 @dataclasses.dataclass
 class FsmFrontierDecomposition:
+    """Decomposition of the frontier between two FSMs."""
+
     frontier: FsmFieldFrontier
     suffix: greenery.Fsm
     prefix: greenery.Fsm
     intersection: greenery.Fsm
 
     def is_colliding(self) -> bool:
+        """Return whether the two FSMs are colliding with each other."""
         return not self.intersection.empty()
 
-    def generate_example(self) -> str:
+    def generate_colliding_example(self) -> str:
+        """Generate a colliding example."""
         trim_prefix = _trim_right_reminder(self.frontier.left.fsm)
         trim_suffix = _trim_left_reminder(self.frontier.right.fsm)
         ambigious_fsm = trim_prefix + self.intersection + trim_suffix
         return next(ambigious_fsm.strings([]), "")
 
 
+@dataclasses.dataclass(frozen=True)
 class FsmFieldFrontier:
-    def __init__(self, fsm_left: FsmNode, fsm_right: FsmNode):
-        self._left = fsm_left
-        self._right = fsm_right
+    """Define a frontier between two FSMs."""
 
-    @property
-    def left(self) -> FsmNode:
-        return self._left
-
-    @property
-    def right(self) -> FsmNode:
-        return self._right
+    left: FsmNode
+    right: FsmNode
 
     def decompose(self) -> FsmFrontierDecomposition:
-        fsm1_suffix = _right_reminder(self._left.fsm)
-        fsm2_prefix = _left_reminder(self._right.fsm)
-        intersection = (fsm1_suffix.intersection(fsm2_prefix) - greenery.EPSILON)
+        """Decompose the FSM frontier."""
+        fsm1_suffix = _right_reminder(self.left.fsm)
+        fsm2_prefix = _left_reminder(self.right.fsm)
+        intersection = fsm1_suffix.intersection(fsm2_prefix) - greenery.EPSILON
         return FsmFrontierDecomposition(self, fsm1_suffix, fsm2_prefix, intersection)
 
 
 class CollisionResult:
+    """Result of collision computation."""
+
     def __init__(self, token_decompositions: list[FsmFrontierDecomposition]) -> None:
+        """Initialize a CollisionResult object."""
         self._token_decompositions = token_decompositions
 
-    def is_valid(self) -> bool:
+    def has_collision(self) -> bool:
+        """Return whether one or more collision exists."""
         # Check each decomposition
         return all(not decomp.is_colliding() for decomp in self._token_decompositions)
 
     def generate_examples(self) -> Iterator[str]:
+        """Generate an example of a collision."""
         for decomp in self._token_decompositions:
             if decomp.is_colliding():
-                yield decomp.generate_example()
+                yield decomp.generate_colliding_example()
+
+
+class FsmNodeBuilder:
+    """Builder of FSM node from TemplateNode.
+
+    Has an internal cache to avoid recomputing FSM from the same template node multiple
+    times.
+    """
+
+    def __init__(self) -> None:
+        """Initialize a FSMNodeBuilder object."""
+        self._fsm_by_template_node: dict[TemplateNode, FsmNode] = {}
+        self._engine = ValidationRegexEngine()
+
+    def build_node_fsm(self, node: TemplateNode) -> FsmNode:
+        """Build an FSM node from TemplateNode."""
+        if node in self._fsm_by_template_node:
+            return self._fsm_by_template_node[node]
+
+        # Build the regex and the fsm
+        regex = self._engine.build("", node)
+        fsm = greenery.parse(regex).to_fsm()
+        fsm_node = FsmNode(node, fsm)
+        self._fsm_by_template_node[node] = fsm_node
+        return fsm_node
 
 
 class FsmChain:
+    """A chain of finite state machines."""
+
     @classmethod
-    def from_chain(
-        cls, chain: Chain, engine: AbstractRegexEngine | None = None
-    ) -> FsmChain:
+    def from_chain(cls, chain: Chain, builder: FsmNodeBuilder | None = None) -> FsmChain:
         """Create a FsmChain from a template chain."""
-        if engine is None:
-            engine = ValidationRegexEngine()
+        if builder is None:
+            builder = FsmNodeBuilder()
 
         nodes = chain.nodes
 
         fsm_nodes: list[FsmNode] = []
 
         for node in nodes:
-            regex = engine.build("", node)
-            fsm = greenery.parse(regex).to_fsm()
-            fsm_nodes.append(FsmNode(node, fsm))
+            fsm_node = builder.build_node_fsm(node)
+            fsm_nodes.append(fsm_node)
 
         return cls(fsm_nodes)
 
@@ -324,12 +260,8 @@ class FsmChain:
         """Initialize the chain of fsms."""
         self._nodes = fsm_nodes
 
-    def iter_fsm_nodes(self) -> Iterator[FsmNode]:
-        """Iterate over the fsm tokens in the model."""
-        yield from self._nodes
-
-    def get_collision_result(self) -> CollisionResult:
-
+    def compute_collision(self) -> CollisionResult:
+        """Compute the collision within the fsm chain."""
         # Only keep field reference and separators
         nodes = list(self._nodes)
         if not nodes:
