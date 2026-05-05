@@ -239,8 +239,9 @@ def compute_collision(chain: FsmChain) -> CollisionResult:
         return CollisionResult([])
 
     first_node = nodes[0]
-    if not isinstance(first_node.node, FieldReference):
-        return CollisionResult([])
+
+    # TODO(PoloB): we could do the parsing differently to avoid this assertion
+    assert isinstance(first_node.node, FieldReference)  # noqa: S101
 
     current_node = FsmFieldNode(first_node.node, first_node.fsm)
     current_fsm = current_node.fsm
