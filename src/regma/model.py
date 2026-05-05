@@ -8,9 +8,9 @@ import re
 import typing
 from typing import Any
 from typing import ClassVar
-from typing import Self
 from typing import TypeVar
 
+from typing_extensions import Self  # noqa: UP035
 from typing_extensions import dataclass_transform
 
 from regma import reference
