@@ -85,7 +85,7 @@ class FooBarModel(TemplateModel):
     """Model with two fields foo and bar."""
 
     __template__ = "{foo}_{bar}"
-    foo: str = string(r"\w+")
+    foo: str = string(r"[a-zA-Z0-9]+")
     bar: int = integer()
 
 
@@ -94,5 +94,5 @@ class ComplexModel(TemplateModel):
 
     __template__ = "/root/{foo_bar.foo}_{foo_bar.bar}_{foo}_{bar}"
     foo_bar: FooBarModel
-    foo: str = string(r"\w+")
+    foo: str = string(r"[a-zA-Z0-9]+")
     bar: int = integer()

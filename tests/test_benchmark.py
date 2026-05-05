@@ -18,7 +18,7 @@ def _create_model() -> type[TemplateModel]:
 
     class BenchmarkModel1(TemplateModel):
         __template__ = "{foo}_{bar}"
-        foo: str = string(r"\w+")
+        foo: str = string(r"[a-zA-Z0-9]+")
         bar: int = integer(0, 9999, 4)
 
     return BenchmarkModel1
@@ -31,7 +31,7 @@ def _create_reference_model() -> type[TemplateModel]:
     class BenchmarkModel2(TemplateModel):
         __template__ = "{foo_bar}_{foo_bar.bar}_{foo_bar.foo}_{foo}_{bar}"
         foo_bar: TemplateModel = reference(model1)
-        foo: str = string(r"\w+")
+        foo: str = string(r"[a-zA-Z0-9]+")
         bar: int = integer(0, 9999, 4)
 
     return BenchmarkModel2

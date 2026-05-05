@@ -23,6 +23,7 @@ classifiers = [
 requires-python = ">=3.11"
 dependencies = [
     "typing-extensions>=4.15.0",
+    "greenery>=4.2.2",
 ]
 
 [dependency-groups]
@@ -43,11 +44,6 @@ docs = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",
     "mkdocstrings[python]>=0.25",
-]
-
-[project.optional-dependencies]
-validation = [
-    "greenery>=4.2.2",
 ]
 
 [project.urls]

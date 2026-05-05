@@ -842,12 +842,8 @@ wheels = [
 name = "regma"
 source = { editable = "." }
 dependencies = [
-    { name = "typing-extensions" },
-]
-
-[package.optional-dependencies]
-validation = [
     { name = "greenery" },
+    { name = "typing-extensions" },
 ]
 
 [package.dev-dependencies]
@@ -875,10 +871,9 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "greenery", marker = "extra == 'validation'", specifier = ">=4.2.2" },
+    { name = "greenery", specifier = ">=4.2.2" },
     { name = "typing-extensions", specifier = ">=4.15.0" },
 ]
-provides-extras = ["validation"]
 
 [package.metadata.requires-dev]
 dev = [

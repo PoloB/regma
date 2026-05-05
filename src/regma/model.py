@@ -31,6 +31,12 @@ from regma.field import choice
 from regma.field import custom_field
 from regma.field import integer
 from regma.field import string
+from regma.validation.field import FieldNameValidator
+from regma.validation.field import FieldReferenceValidator
+from regma.validation.fsm import FsmNodeBuilder
+from regma.validation.fsm import FsmNodeCache
+from regma.validation.fsm import TemplateHasNoCollision
+from regma.validation.fsm import TemplateHasNoEmptyToken
 
 
 def _parse_template(template_model: TemplateModelMeta) -> Chain:
@@ -98,68 +104,6 @@ def _parse_template(template_model: TemplateModelMeta) -> Chain:
         nodes.append(Separator(template[cursor:]))
 
     return Chain(nodes)
-
-
-def _validate_bound_field_names(model_cls: TemplateModelMeta) -> None:
-    """Validate all fields have a valid name."""
-    for attr in (*model_cls.__model_fields__, *model_cls.__typed_fields__):
-        if attr.endswith("_"):
-            msg = (
-                f"{model_cls.__name__}: field attribute {attr!r} cannot ends with "
-                f"underscore (reserved for regex construction)"
-            )
-            raise DefinitionError(msg)
-
-        if "__" in attr:
-            msg = (
-                f"{model_cls.__name__}: field attribute {attr!r} cannot contains "
-                f"double underscores (reserved for regex construction)"
-            )
-            raise DefinitionError(msg)
-
-
-def _validate_field_references(model_cls: TemplateModelMeta) -> None:
-    """Validate the model has all its fields in __template__."""
-    # Template shall contain all the element required to build its model references
-
-    def _check_has_all_elements(
-        model_cls_: TemplateModelMeta, references: set[str], parent_bound: str
-    ) -> None:
-        # Check leaf fields are used in the template
-        missing_fields = set(model_cls_.__typed_fields__).difference(references)
-        if missing_fields:
-            # Rebuild the full missing field
-            missing_full_fields = sorted(
-                f"{parent_bound}.{missing_field}" for missing_field in missing_fields
-            )
-            msg = (
-                f"All fields of {parent_bound!r} are not used in "
-                f"{model_cls.__name__} template (missing {missing_full_fields})"
-            )
-            raise DefinitionError(msg)
-
-        for bound_name, model_field in model_cls_.__model_fields__.items():
-            # Get all the references starting with the bound name
-            model_refs = {r for r in references if r.startswith(bound_name)}
-            if bound_name in model_refs:
-                # There is a complete reference, this is ok
-                continue
-
-            sub_references = {r.split(".", maxsplit=1)[1] for r in model_refs}
-            # Check recursively
-            _check_has_all_elements(
-                model_field.field.model,
-                sub_references,
-                f"{parent_bound}.{bound_name}" if parent_bound else bound_name,
-            )
-
-    ref_fields = {
-        node.name
-        for node in model_cls.__chain__.nodes
-        if isinstance(node, FieldReference)
-    }
-
-    _check_has_all_elements(model_cls, ref_fields, "")
 
 
 T_model = TypeVar("T_model", bound="TemplateModel")
@@ -231,7 +175,8 @@ class TemplateModelMeta(type):
         cls.__fields__ = __fields
         cls.__typed_fields__ = __bound_fields
         cls.__model_fields__ = __model_fields
-        _validate_bound_field_names(cls)
+
+        FieldNameValidator().validate(cls)
 
         # Validate template
         __raw_template: Any = namespace.get("__template__")
@@ -253,7 +198,10 @@ class TemplateModelMeta(type):
 
         __chain: Chain = _parse_template(cls)
         cls.__chain__ = __chain
-        _validate_field_references(cls)
+        FieldReferenceValidator().validate(cls)
+        __fsm_builder = FsmNodeBuilder(FsmNodeCache())
+        TemplateHasNoEmptyToken(__fsm_builder).validate(cls)
+        TemplateHasNoCollision(__fsm_builder).validate(cls)
 
         # Go through all bases to get the regex engine
         __regex_engines = (c.get("__regex_engine__") for c in __contents)

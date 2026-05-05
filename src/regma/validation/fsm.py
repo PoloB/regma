@@ -1,30 +1,25 @@
-"""Module providing validation routines for regma templates.
-
-The module provide the following functions
-"""
+"""Module providing validation routines for regma templates."""
 
 from __future__ import annotations
 
 import dataclasses
 from typing import TYPE_CHECKING
 
+import greenery
+
+from regma.core import BoundField
 from regma.core import FieldReference
+from regma.core import FormatableNode
 from regma.core import Separator
-
-try:
-    import greenery
-except ImportError as exc:
-    msg = "Package 'greenery' is required for template validation."
-    raise ImportError(msg) from exc
-
-
 from regma.engine import AbstractRegexEngine
+from regma.error import ValidityError
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from regma import TemplateNode
     from regma.core import Chain
+    from regma.model import TemplateModelMeta
 
 
 class ValidationRegexEngine(AbstractRegexEngine):
@@ -153,7 +148,15 @@ def _trim_left_reminder(fsm: greenery.Fsm) -> greenery.Fsm:
 class FsmNode:
     """A finite state machine object corresponding to a template node."""
 
-    node: TemplateNode
+    node: FormatableNode
+    fsm: greenery.Fsm
+
+
+@dataclasses.dataclass(frozen=True)
+class FsmFieldNode:
+    """A finite state machine object corresponding to a template field."""
+
+    field: FieldReference
     fsm: greenery.Fsm
 
 
@@ -161,7 +164,7 @@ class FsmNode:
 class FsmFrontierDecomposition:
     """Decomposition of the frontier between two FSMs."""
 
-    frontier: FsmFieldFrontier
+    frontier: FsmFrontier
     suffix: greenery.Fsm
     prefix: greenery.Fsm
     intersection: greenery.Fsm
@@ -179,11 +182,11 @@ class FsmFrontierDecomposition:
 
 
 @dataclasses.dataclass(frozen=True)
-class FsmFieldFrontier:
+class FsmFrontier:
     """Define a frontier between two FSMs."""
 
-    left: FsmNode
-    right: FsmNode
+    left: FsmFieldNode
+    right: FsmFieldNode
 
     def decompose(self) -> FsmFrontierDecomposition:
         """Decompose the FSM frontier."""
@@ -203,13 +206,83 @@ class CollisionResult:
     def has_collision(self) -> bool:
         """Return whether one or more collision exists."""
         # Check each decomposition
-        return all(not decomp.is_colliding() for decomp in self._token_decompositions)
+        return any(decomp.is_colliding() for decomp in self._token_decompositions)
+
+    def get_colliding_frontiers(self) -> list[FsmFrontier]:
+        """Return the list of frontiers colliding with each other."""
+        return [
+            decomp.frontier
+            for decomp in self._token_decompositions
+            if decomp.is_colliding()
+        ]
 
     def generate_examples(self) -> Iterator[str]:
         """Generate an example of a collision."""
         for decomp in self._token_decompositions:
             if decomp.is_colliding():
                 yield decomp.generate_colliding_example()
+
+
+def compute_collision(chain: FsmChain) -> CollisionResult:
+    """Compute the collision within the fsm chain."""
+    # Only keep field reference and separators
+    nodes = list(chain.iter_nodes())
+
+    # Remove elements until we fall onto a FieldReference
+    while nodes and not isinstance(nodes[0].node, FieldReference):
+        nodes.pop(0)
+
+    while nodes and not isinstance(nodes[-1].node, FieldReference):
+        nodes.pop(-1)
+
+    if not nodes:
+        return CollisionResult([])
+
+    first_node = nodes[0]
+    if not isinstance(first_node.node, FieldReference):
+        return CollisionResult([])
+
+    current_node = FsmFieldNode(first_node.node, first_node.fsm)
+    current_fsm = current_node.fsm
+
+    # Create frontiers between FieldReference
+    frontier_nodes: list[tuple[FsmFieldNode, FsmFieldNode]] = []
+
+    for node in nodes[1:]:
+        if isinstance(node.node, Separator):
+            current_fsm = current_fsm.concatenate(node.fsm)
+            continue
+
+        if isinstance(node.node, FieldReference):
+            # Store the current fsm
+            left_node = FsmFieldNode(current_node.field, current_fsm)
+            right_node = FsmFieldNode(node.node, first_node.fsm)
+            frontier_nodes.append((left_node, right_node))
+            current_node = right_node
+            current_fsm = current_node.fsm
+
+    frontier_decompositions: list[FsmFrontierDecomposition] = []
+
+    for fsm1, fsm2 in frontier_nodes:
+        frontier_decompositions.append(FsmFrontier(fsm1, fsm2).decompose())
+
+    return CollisionResult(frontier_decompositions)
+
+
+class FsmNodeCache:
+    """A cache for fsm nodes."""
+
+    def __init__(self) -> None:
+        """Initialize the cache."""
+        self._fsm_by_template_node: dict[FormatableNode, FsmNode] = {}
+
+    def get_fsm(self, node: FormatableNode) -> FsmNode | None:
+        """Return the fsm node for the given node."""
+        return self._fsm_by_template_node.get(node)
+
+    def push_fsm(self, node: FormatableNode, fsm_node: FsmNode) -> None:
+        """Push the fsm node for the given node."""
+        self._fsm_by_template_node[node] = fsm_node
 
 
 class FsmNodeBuilder:
@@ -219,21 +292,22 @@ class FsmNodeBuilder:
     times.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, cache: FsmNodeCache) -> None:
         """Initialize a FSMNodeBuilder object."""
-        self._fsm_by_template_node: dict[TemplateNode, FsmNode] = {}
+        self._cache = cache
         self._engine = ValidationRegexEngine()
 
-    def build_node_fsm(self, node: TemplateNode) -> FsmNode:
+    def build_node_fsm(self, node: FormatableNode) -> FsmNode:
         """Build an FSM node from TemplateNode."""
-        if node in self._fsm_by_template_node:
-            return self._fsm_by_template_node[node]
+        fsm_node = self._cache.get_fsm(node)
+        if fsm_node is not None:
+            return fsm_node
 
         # Build the regex and the fsm
         regex = self._engine.build("", node)
         fsm = greenery.parse(regex).to_fsm()
         fsm_node = FsmNode(node, fsm)
-        self._fsm_by_template_node[node] = fsm_node
+        self._cache.push_fsm(node, fsm_node)
         return fsm_node
 
 
@@ -241,11 +315,8 @@ class FsmChain:
     """A chain of finite state machines."""
 
     @classmethod
-    def from_chain(cls, chain: Chain, builder: FsmNodeBuilder | None = None) -> FsmChain:
+    def from_chain(cls, chain: Chain, builder: FsmNodeBuilder) -> FsmChain:
         """Create a FsmChain from a template chain."""
-        if builder is None:
-            builder = FsmNodeBuilder()
-
         nodes = chain.nodes
 
         fsm_nodes: list[FsmNode] = []
@@ -260,52 +331,65 @@ class FsmChain:
         """Initialize the chain of fsms."""
         self._nodes = fsm_nodes
 
-    def compute_collision(self) -> CollisionResult:
-        """Compute the collision within the fsm chain."""
-        # Only keep field reference and separators
-        nodes = list(self._nodes)
-        if not nodes:
-            return CollisionResult([])
+    def iter_nodes(self) -> Iterator[FsmNode]:
+        """Iterate over all nodes in the chain."""
+        yield from self._nodes
 
-        # Remove elements until we fall onto a FieldReference
-        first_node = nodes[0]
 
-        while not isinstance(first_node.node, FieldReference):
-            nodes.pop(0)
-            first_node = nodes[0]
+class TemplateHasNoCollision:
+    """Validate a template has no collision."""
 
-        if not nodes:
-            return CollisionResult([])
+    def __init__(self, fsm_builder: FsmNodeBuilder) -> None:
+        """Initialize the validator."""
+        self._fsm_builder = fsm_builder
 
-        last_node = nodes[-1]
+    def validate(self, template: TemplateModelMeta) -> None:
+        """Raise ValidityError if template has collision."""
+        chain = FsmChain.from_chain(template.__chain__, self._fsm_builder)
+        collision = compute_collision(chain)
+        if not collision.has_collision():
+            return
 
-        while not isinstance(last_node.node, FieldReference):
-            nodes.pop(-1)
-            last_node = nodes[-1]
+        colliding_frontiers = collision.get_colliding_frontiers()
 
-        if not nodes:
-            return CollisionResult([])
+        token_pairs = ", ".join(
+            [f"({f.left.field.name}, {f.right.field.name})" for f in colliding_frontiers]
+        )
 
-        current_node = nodes[0]
-        current_fsm = current_node.fsm
+        examples = ", ".join(collision.generate_examples())
 
-        # Create frontiers between FieldReference
-        frontier_nodes: list[tuple[FsmNode, FsmNode]] = []
+        error_message = (
+            f"Template {template} has collision on following token pairs: "
+            f"{token_pairs}. "
+            f"Example strings: {examples}"
+        )
+        raise ValidityError(error_message)
 
-        for node in nodes[1:]:
-            if isinstance(node.node, Separator):
-                current_fsm = current_fsm.concatenate(node.fsm)
-                continue
 
-            if isinstance(node.node, FieldReference):
-                # Store the current fsm
-                frontier_nodes.append((FsmNode(current_node.node, current_fsm), node))
-                current_node = node
-                current_fsm = current_node.fsm
+class TemplateHasNoEmptyToken:
+    """Validate a template has no empty token."""
 
-        frontier_decompositions: list[FsmFrontierDecomposition] = []
+    def __init__(self, fsm_builder: FsmNodeBuilder) -> None:
+        """Initialize the validator."""
+        self._fsm_builder = fsm_builder
 
-        for fsm1, fsm2 in frontier_nodes:
-            frontier_decompositions.append(FsmFieldFrontier(fsm1, fsm2).decompose())
+    def validate(self, template: TemplateModelMeta) -> None:
+        """Validate the template model."""
+        chain = FsmChain.from_chain(template.__chain__, self._fsm_builder)
 
-        return CollisionResult(frontier_decompositions)
+        empty_nodes: list[FsmNode] = [
+            fsm_node
+            for fsm_node in chain.iter_nodes()
+            if fsm_node.fsm.initial in fsm_node.fsm.finals
+        ]
+
+        if not empty_nodes:
+            return
+
+        token_names = ", ".join(
+            [node.node.name for node in empty_nodes if isinstance(node.node, BoundField)]
+        )
+        error_message = (
+            f"Template {template} has fields which can be empty: {token_names}"
+        )
+        raise ValidityError(error_message)

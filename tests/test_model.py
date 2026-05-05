@@ -7,6 +7,7 @@ import pytest
 from regma import DefinitionError
 from regma import ParseError
 from regma import TemplateModel
+from regma.error import ValidationError
 from regma.field import integer
 from regma.field import reference
 from regma.field import string
@@ -99,12 +100,12 @@ def test_model_can_reference_other_models_through_model_field() -> None:
 
     class FirstModel(TemplateModel):
         __template__ = "{foo}_{bar}"
-        foo: str = string(r"\w+")
+        foo: str = string(r"[a-zA-Z0-9]+")
         bar: str = string(r"\w+")
 
     class SecondModel(TemplateModel):
         __template__ = "{foo}/{bar}/{first}/{first.foo}_{foo}_{bar}_{first.bar}_{first}"
-        foo: str = string(r"\w+")
+        foo: str = string(r"[a-zA-Z0-9]+")
         bar: str = string(r"\w+")
         first: FirstModel = reference(FirstModel)
 
@@ -112,7 +113,7 @@ def test_model_can_reference_other_models_through_model_field() -> None:
     assert len(SecondModel.__model_fields__) == 1
     assert (
         SecondModel.__regex__
-        == r"(?P<foo>\w+)/(?P<bar>\w+)/(?P<first>(?P<first__foo>\w+)"
+        == r"(?P<foo>[a-zA-Z0-9]+)/(?P<bar>\w+)/(?P<first>(?P<first__foo>[a-zA-Z0-9]+)"
         r"_(?P<first__bar>\w+))/(?P=first__foo)_(?P=foo)_(?P=bar)_(?P=first__bar)_(?P=first)"
     )
     assert (
@@ -132,7 +133,7 @@ def test_definition_fails_referencing_unknown_field() -> None:
 
 def test_definition_fails_if_field_ends_with_underscore() -> None:
     """Definition of model shall fail if the field ends with underscore."""
-    with pytest.raises(DefinitionError):
+    with pytest.raises(ValidationError):
 
         class TestModel(TemplateModel):
             __template__ = "{test_}"
@@ -145,7 +146,7 @@ def test_definition_fails_if_field_contain_double_underscore() -> None:
     We need this to make sure there is no collision between the name of the field and
     the __ used as separator in capturing groups.
     """
-    with pytest.raises(DefinitionError):
+    with pytest.raises(ValidationError):
 
         class TestModel(TemplateModel):
             __template__ = "{foo__bar}"
@@ -171,11 +172,11 @@ def test_definition_fails_with_missing_attribute() -> None:
 
 def test_definition_fails_with_missing_model_field() -> None:
     """Definition oif model fails if all the fields are not used in the template."""
-    with pytest.raises(DefinitionError):
+    with pytest.raises(ValidationError):
 
         class TestModel(TemplateModel):
             __template__ = "{foo}"
-            foo: str = string(r"\w+")
+            foo: str = string(r"[a-zA-Z0-9]+")
             bar: str = string(r"\w+")
 
 
@@ -184,14 +185,14 @@ def test_definition_fails_with_missing_sub_model_field() -> None:
 
     class FirstModel(TemplateModel):
         __template__ = "{foo}_{bar}"
-        foo: str = string(r"\w+")
+        foo: str = string(r"[a-zA-Z0-9]+")
         bar: str = string(r"\w+")
 
-    with pytest.raises(DefinitionError):
+    with pytest.raises(ValidationError):
 
         class SecondModel(TemplateModel):
             __template__ = "{foo}/{bar}/{first.foo}"  # first.bar is missing
-            foo: str = string(r"\w+")
+            foo: str = string(r"[a-zA-Z0-9]+")
             bar: str = string(r"\w+")
             first: FirstModel = reference(FirstModel)
 
@@ -222,7 +223,7 @@ def test_model_eq_different_type() -> None:
 
     class OtherFooBarModel(TemplateModel):
         __template__ = "{foo}_{bar}"
-        foo: str = string(r"\w+")
+        foo: str = string(r"[a-zA-Z0-9]+")
         bar: int = integer()
 
     mode1 = FooBarModel("test", 1)
