@@ -20,7 +20,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Typing :: Typed",
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 dependencies = [
     "typing-extensions>=4.15.0",
     "greenery>=4.2.2",
@@ -32,9 +32,9 @@ dev = [
     { include-group = "lint" },
 ]
 test = [
-    "pytest>=9.0.2",
-    "pytest-cov>=7.0.0",
-    "pytest-benchmark>=5.2.3",
+    "pytest",
+    "pytest-cov",
+    "pytest-benchmark",
 ]
 lint = [
     "mypy>=1.19.1",
