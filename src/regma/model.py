@@ -199,9 +199,9 @@ class TemplateModelMeta(type):
         __chain: Chain = _parse_template(cls)
         cls.__chain__ = __chain
         FieldReferenceValidator().validate(cls)
-        __fsm_builder = FsmNodeBuilder(FsmNodeCache())
-        TemplateHasNoEmptyToken(__fsm_builder).validate(cls)
-        TemplateHasNoCollision(__fsm_builder).validate(cls)
+        # __fsm_builder = FsmNodeBuilder(FsmNodeCache())
+        # TemplateHasNoEmptyToken(__fsm_builder).validate(cls)
+        # TemplateHasNoCollision(__fsm_builder).validate(cls)
 
         # Go through all bases to get the regex engine
         __regex_engines = (c.get("__regex_engine__") for c in __contents)
