@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import collections
 import dataclasses
+import sys
 from typing import TYPE_CHECKING
 
 import greenery
@@ -144,6 +146,67 @@ def _trim_left_reminder(fsm: greenery.Fsm) -> greenery.Fsm:
     return greenery.fsm.crawl(alphabet, frozenset(fsm.finals), final, follow).reduce()
 
 
+def _get_flat_charclass(charclass: greenery.Charclass) -> greenery.Charclass:
+    """Return a random char from the given class."""
+    if not charclass.negated or not charclass.ord_ranges:
+        return charclass
+
+    # Construct a flat charclass from negated
+    minimum = 0
+    maximum = sys.maxunicode
+
+    # Assume the ranges are ordered
+    ranges: list[tuple[str, str]] = []
+    for char_range in charclass.ord_ranges:
+        ranges.append((chr(minimum), chr(char_range[0] - 1)))
+        minimum = char_range[1] + 1
+
+    ranges.append((chr(charclass.ord_ranges[-1][1] + 1), chr(maximum)))
+
+    return greenery.Charclass(tuple(ranges))
+
+
+def _generate_example(fsm: greenery.Fsm) -> str:
+    """Generate an example of string accepted by the given fsm."""
+    # We start from the initial state of the fsm and select a random transition until
+    # we get to a final state.
+    # We try to avoid states that we already encounter when possible
+    current_state_stack = [fsm.initial]
+    cumulated_classes: list[greenery.Charclass] = []
+
+    # reverse the map of the fsm
+    reversed_map: dict[int, dict[int, greenery.Charclass]] = collections.defaultdict(
+        dict
+    )
+
+    for state, transition_map in fsm.map.items():
+        for charclass, transition_state in transition_map.items():
+            current_charclass = reversed_map[state].get(transition_state)
+            if current_charclass:
+                new_charclass = current_charclass.union(charclass)
+            else:
+                new_charclass = charclass
+            reversed_map[state][transition_state] = new_charclass
+
+    seen_states: set[int] = set()
+
+    while (current_state := current_state_stack[-1]) not in fsm.finals:
+        transitions = reversed_map[current_state]
+        # remove the seen states
+        possible_transitions = set(transitions).difference(seen_states)
+        seen_states.add(current_state)
+        if not possible_transitions:
+            current_state_stack.pop(-1)
+            cumulated_classes.pop(-1)
+            continue
+
+        current_state = possible_transitions.pop()
+        cumulated_classes.append(_get_flat_charclass(transitions[current_state]))
+        current_state_stack.append(current_state)
+
+    return "".join(next(char.get_chars(), "") for char in cumulated_classes)
+
+
 @dataclasses.dataclass(frozen=True)
 class FsmNode:
     """A finite state machine object corresponding to a template node."""
@@ -177,8 +240,22 @@ class FsmFrontierDecomposition:
         """Generate a colliding example."""
         trim_prefix = _trim_right_reminder(self.frontier.left.fsm)
         trim_suffix = _trim_left_reminder(self.frontier.right.fsm)
-        ambigious_fsm = trim_prefix + self.intersection + trim_suffix
-        return next(ambigious_fsm.strings([]), "")
+        ambiguous_fsm = trim_prefix.concatenate(self.intersection, trim_suffix)
+        left_example1 = _generate_example(trim_prefix + self.intersection)
+        right_example1 = _generate_example(trim_suffix)
+        left_example2 = _generate_example(trim_prefix)
+        right_example2 = _generate_example(self.intersection + trim_suffix)
+
+        return [
+            {
+                self.frontier.left.field.name: left_example1,
+                self.frontier.right.field.name: right_example1,
+            },
+            {
+                self.frontier.left.field.name: left_example2,
+                self.frontier.right.field.name: right_example2,
+            },
+        ]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -257,7 +334,7 @@ def compute_collision(chain: FsmChain) -> CollisionResult:
         if isinstance(node.node, FieldReference):
             # Store the current fsm
             left_node = FsmFieldNode(current_node.field, current_fsm)
-            right_node = FsmFieldNode(node.node, first_node.fsm)
+            right_node = FsmFieldNode(node.node, node.fsm)
             frontier_nodes.append((left_node, right_node))
             current_node = right_node
             current_fsm = current_node.fsm
@@ -270,20 +347,20 @@ def compute_collision(chain: FsmChain) -> CollisionResult:
     return CollisionResult(frontier_decompositions)
 
 
-class FsmNodeCache:
-    """A cache for fsm nodes."""
+class FsmRegexCache:
+    """A cache of fsm for regex."""
 
     def __init__(self) -> None:
         """Initialize the cache."""
-        self._fsm_by_template_node: dict[FormatableNode, FsmNode] = {}
+        self._fsm_by_regex: dict[str, greenery.Fsm] = {}
 
-    def get_fsm(self, node: FormatableNode) -> FsmNode | None:
-        """Return the fsm node for the given node."""
-        return self._fsm_by_template_node.get(node)
+    def get_fsm(self, regex: str) -> greenery.Fsm | None:
+        """Return the fsm for the given regex."""
+        return self._fsm_by_regex.get(regex)
 
-    def push_fsm(self, node: FormatableNode, fsm_node: FsmNode) -> None:
-        """Push the fsm node for the given node."""
-        self._fsm_by_template_node[node] = fsm_node
+    def push_fsm(self, regex: str, fsm: greenery.Fsm) -> None:
+        """Push the fsm for the given regex."""
+        self._fsm_by_regex[regex] = fsm
 
 
 class FsmNodeBuilder:
@@ -293,23 +370,24 @@ class FsmNodeBuilder:
     times.
     """
 
-    def __init__(self, cache: FsmNodeCache) -> None:
+    def __init__(
+        self, cache: FsmRegexCache, regex_engine: AbstractRegexEngine | None = None
+    ) -> None:
         """Initialize a FSMNodeBuilder object."""
         self._cache = cache
-        self._engine = ValidationRegexEngine()
+        self._engine = regex_engine or ValidationRegexEngine()
 
     def build_node_fsm(self, node: FormatableNode) -> FsmNode:
         """Build an FSM node from TemplateNode."""
-        fsm_node = self._cache.get_fsm(node)
-        if fsm_node is not None:
-            return fsm_node
-
-        # Build the regex and the fsm
         regex = self._engine.build("", node)
+        fsm = self._cache.get_fsm(regex)
+        if fsm is not None:
+            return FsmNode(node, fsm)
+
+        # Build the fsm
         fsm = greenery.parse(regex).to_fsm()
-        fsm_node = FsmNode(node, fsm)
-        self._cache.push_fsm(node, fsm_node)
-        return fsm_node
+        self._cache.push_fsm(regex, fsm)
+        return FsmNode(node, fsm)
 
 
 class FsmChain:

@@ -34,7 +34,7 @@ from regma.field import string
 from regma.validation.field import FieldNameValidator
 from regma.validation.field import FieldReferenceValidator
 from regma.validation.fsm import FsmNodeBuilder
-from regma.validation.fsm import FsmNodeCache
+from regma.validation.fsm import FsmRegexCache
 from regma.validation.fsm import TemplateHasNoCollision
 from regma.validation.fsm import TemplateHasNoEmptyToken
 
@@ -199,9 +199,9 @@ class TemplateModelMeta(type):
         __chain: Chain = _parse_template(cls)
         cls.__chain__ = __chain
         FieldReferenceValidator().validate(cls)
-        # __fsm_builder = FsmNodeBuilder(FsmNodeCache())
-        # TemplateHasNoEmptyToken(__fsm_builder).validate(cls)
-        # TemplateHasNoCollision(__fsm_builder).validate(cls)
+        __fsm_builder = FsmNodeBuilder(FsmRegexCache())
+        TemplateHasNoEmptyToken(__fsm_builder).validate(cls)
+        TemplateHasNoCollision(__fsm_builder).validate(cls)
 
         # Go through all bases to get the regex engine
         __regex_engines = (c.get("__regex_engine__") for c in __contents)

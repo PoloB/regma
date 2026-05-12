@@ -15,9 +15,10 @@ from regma.validation.fsm import CollisionResult
 from regma.validation.fsm import FsmChain
 from regma.validation.fsm import FsmNode
 from regma.validation.fsm import FsmNodeBuilder
-from regma.validation.fsm import FsmNodeCache
+from regma.validation.fsm import FsmRegexCache
 from regma.validation.fsm import TemplateHasNoCollision
 from regma.validation.fsm import TemplateHasNoEmptyToken
+from regma.validation.fsm import ValidationRegexEngine
 from regma.validation.fsm import compute_collision
 
 
@@ -37,20 +38,23 @@ def simple_model() -> type[TemplateModel]:
 @pytest.fixture
 def fsm_builder() -> FsmNodeBuilder:
     """Return a FsmNodeBuilder object."""
-    return FsmNodeBuilder(FsmNodeCache())
+    return FsmNodeBuilder(FsmRegexCache())
 
 
 def test_fsm_builder_cache() -> None:
     """Verify the cache of fsm builder is working."""
-    fsm_cache = FsmNodeCache()
-    fsm_node_builder = FsmNodeBuilder(fsm_cache)
+    fsm_cache = FsmRegexCache()
+    engine = ValidationRegexEngine()
+    fsm_node_builder = FsmNodeBuilder(fsm_cache, engine)
     bound_field = BoundField("test", StrField(".+"))
     fsm_node = fsm_node_builder.build_node_fsm(bound_field)
     assert isinstance(fsm_node, FsmNode)
     assert fsm_node.node is bound_field
-    assert fsm_cache.get_fsm(bound_field) is fsm_node
+    regex = bound_field.to_regex(engine)
+    assert fsm_cache.get_fsm(regex) is fsm_node.fsm
     other_fsm_node = fsm_node_builder.build_node_fsm(bound_field)
-    assert fsm_node is other_fsm_node
+    assert fsm_node.fsm == other_fsm_node.fsm
+    assert fsm_node.node == other_fsm_node.node
 
 
 def test_compute_collision_with_empty_chain(fsm_builder: FsmNodeBuilder) -> None:
@@ -105,11 +109,20 @@ def test_separator_are_used_in_construction(fsm_builder: FsmNodeBuilder) -> None
     TemplateHasNoCollision(fsm_builder).validate(_TestModel)
 
 
+def test_success_on_complex_example() -> None:
+    """Make sure a more complex regex template also works."""
+    class _TestModel(TemplateModel):
+        foo: str = string(r"[a-z][a-z_]+")
+        bar: str = string(r"[a-z]+")
+        __template__ = "{foo}_{bar}"
+
+
+
 def test_failing_on_colliding_model() -> None:
     """Make sure a nonbijective model fails validation."""
     with pytest.raises(ValidityError):
 
         class _TestModel(TemplateModel):
             __template__ = "start_{foo}_{bar}_end"
-            foo: str = string(r".+")
-            bar: str = string(r".+")
+            foo: str = string(r"[a-z_]+")
+            bar: str = string(r"[a-z_]+")
