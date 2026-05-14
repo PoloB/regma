@@ -166,45 +166,33 @@ def _get_flat_charclass(charclass: greenery.Charclass) -> greenery.Charclass:
     return greenery.Charclass(tuple(ranges))
 
 
+def _get_shortest_path(fsm: greenery.Fsm) -> list[greenery.Charclass]:
+    current_level: list[tuple[int, list[greenery.Charclass]]] = [(fsm.initial, [])]
+    visited = {fsm.initial}
+
+    while current_level:
+        next_level = []
+        for state, path in current_level:
+            if state in fsm.finals:
+                return path
+            if state not in fsm.map:
+                continue
+            for sym, next_state in fsm.map[state].items():
+                if next_state in visited:
+                    continue
+                visited.add(next_state)
+                next_level.append((next_state, [*path, sym]))
+        current_level = next_level
+
+    return []
+
+
 def _generate_example(fsm: greenery.Fsm) -> str:
     """Generate an example of string accepted by the given fsm."""
-    # We start from the initial state of the fsm and select a random transition until
-    # we get to a final state.
-    # We try to avoid states that we already encounter when possible
-    current_state_stack = [fsm.initial]
-    cumulated_classes: list[greenery.Charclass] = []
-
-    # reverse the map of the fsm
-    reversed_map: dict[int, dict[int, greenery.Charclass]] = collections.defaultdict(
-        dict
+    charclass_path = _get_shortest_path(fsm)
+    return "".join(
+        next(_get_flat_charclass(char).get_chars(), "") for char in charclass_path
     )
-
-    for state, transition_map in fsm.map.items():
-        for charclass, transition_state in transition_map.items():
-            current_charclass = reversed_map[state].get(transition_state)
-            if current_charclass:
-                new_charclass = current_charclass.union(charclass)
-            else:
-                new_charclass = charclass
-            reversed_map[state][transition_state] = new_charclass
-
-    seen_states: set[int] = set()
-
-    while (current_state := current_state_stack[-1]) not in fsm.finals:
-        transitions = reversed_map[current_state]
-        # remove the seen states
-        possible_transitions = set(transitions).difference(seen_states)
-        seen_states.add(current_state)
-        if not possible_transitions:
-            current_state_stack.pop(-1)
-            cumulated_classes.pop(-1)
-            continue
-
-        current_state = possible_transitions.pop()
-        cumulated_classes.append(_get_flat_charclass(transitions[current_state]))
-        current_state_stack.append(current_state)
-
-    return "".join(next(char.get_chars(), "") for char in cumulated_classes)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -221,6 +209,43 @@ class FsmFieldNode:
 
     field: FieldReference
     fsm: greenery.Fsm
+    separator: str
+
+
+@dataclasses.dataclass(frozen=True)
+class TokenExample:
+    """An example of a token."""
+
+    node: FsmFieldNode
+    example: str
+
+    def get_display_string(self) -> str:
+        """Return the string representation of the example."""
+        return f"{self.node.field.name}={self.example}"
+
+
+@dataclasses.dataclass(frozen=True)
+class CollidingExample:
+    """An example of colliding tokens."""
+
+    combined_example: str
+    option1: tuple[TokenExample, TokenExample]
+    option2: tuple[TokenExample, TokenExample]
+
+    def get_display_string(self) -> str:
+        """Return the string representation of the example."""
+        left1 = self.option1[0]
+        right1 = self.option1[1]
+        node1 = left1.node
+        return (
+            f"{{{node1.field.name}}}{node1.separator}{{{right1.node.field.name}}} "
+            f"gives '{self.combined_example}' with both "
+            f"({self.option1[0].get_display_string()}, "
+            f"{self.option1[1].get_display_string()}) "
+            f"and "
+            f"({self.option2[0].get_display_string()}, "
+            f"{self.option2[1].get_display_string()}) "
+        )
 
 
 @dataclasses.dataclass
@@ -236,26 +261,30 @@ class FsmFrontierDecomposition:
         """Return whether the two FSMs are colliding with each other."""
         return not self.intersection.empty()
 
-    def generate_colliding_example(self) -> str:
+    def generate_colliding_example(self) -> CollidingExample:
         """Generate a colliding example."""
-        trim_prefix = _trim_right_reminder(self.frontier.left.fsm)
-        trim_suffix = _trim_left_reminder(self.frontier.right.fsm)
-        ambiguous_fsm = trim_prefix.concatenate(self.intersection, trim_suffix)
+        left = self.frontier.left
+        right = self.frontier.right
+        trim_prefix = _trim_right_reminder(left.fsm)
+        trim_suffix = _trim_left_reminder(right.fsm)
         left_example1 = _generate_example(trim_prefix + self.intersection)
         right_example1 = _generate_example(trim_suffix)
-        left_example2 = _generate_example(trim_prefix)
+        left_example2 = _generate_example(trim_prefix).removesuffix(left.separator)
         right_example2 = _generate_example(self.intersection + trim_suffix)
 
-        return [
-            {
-                self.frontier.left.field.name: left_example1,
-                self.frontier.right.field.name: right_example1,
-            },
-            {
-                self.frontier.left.field.name: left_example2,
-                self.frontier.right.field.name: right_example2,
-            },
-        ]
+        return CollidingExample(
+            left_example1 + right_example1,
+            (
+                TokenExample(
+                    self.frontier.left, left_example1.removesuffix(left.separator)
+                ),
+                TokenExample(self.frontier.right, right_example1),
+            ),
+            (
+                TokenExample(self.frontier.left, left_example2),
+                TokenExample(self.frontier.right, right_example2),
+            ),
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -293,7 +322,7 @@ class CollisionResult:
             if decomp.is_colliding()
         ]
 
-    def generate_examples(self) -> Iterator[str]:
+    def generate_examples(self) -> Iterator[CollidingExample]:
         """Generate an example of a collision."""
         for decomp in self._token_decompositions:
             if decomp.is_colliding():
@@ -320,7 +349,8 @@ def compute_collision(chain: FsmChain) -> CollisionResult:
     # TODO(PoloB): we could do the parsing differently to avoid this assertion
     assert isinstance(first_node.node, FieldReference)  # noqa: S101
 
-    current_node = FsmFieldNode(first_node.node, first_node.fsm)
+    current_separator = ""
+    current_node = FsmFieldNode(first_node.node, first_node.fsm, current_separator)
     current_fsm = current_node.fsm
 
     # Create frontiers between FieldReference
@@ -329,12 +359,13 @@ def compute_collision(chain: FsmChain) -> CollisionResult:
     for node in nodes[1:]:
         if isinstance(node.node, Separator):
             current_fsm = current_fsm.concatenate(node.fsm)
+            current_separator = node.node.value
             continue
 
         if isinstance(node.node, FieldReference):
             # Store the current fsm
-            left_node = FsmFieldNode(current_node.field, current_fsm)
-            right_node = FsmFieldNode(node.node, node.fsm)
+            left_node = FsmFieldNode(current_node.field, current_fsm, current_separator)
+            right_node = FsmFieldNode(node.node, node.fsm, "")
             frontier_nodes.append((left_node, right_node))
             current_node = right_node
             current_fsm = current_node.fsm
@@ -435,10 +466,12 @@ class TemplateHasNoCollision:
             [f"({f.left.field.name}, {f.right.field.name})" for f in colliding_frontiers]
         )
 
-        examples = ", ".join(collision.generate_examples())
+        examples = ", ".join(
+            [example.get_display_string() for example in collision.generate_examples()]
+        )
 
         error_message = (
-            f"Template {template} has collision on following token pairs: "
+            f"Template {template} has possible collision on following token pairs: "
             f"{token_pairs}. "
             f"Example strings: {examples}"
         )
