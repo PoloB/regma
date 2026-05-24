@@ -65,10 +65,6 @@ class FieldReferenceValidator(TemplateValidator):
             for bound_name, model_field in model_cls_.__model_fields__.items():
                 # Get all the references starting with the bound name
                 model_refs = {r for r in references if r.startswith(bound_name)}
-                if bound_name in model_refs:
-                    # There is a complete reference, this is ok
-                    continue
-
                 sub_references = {r.split(".", maxsplit=1)[1] for r in model_refs}
                 # Check recursively
                 _check_has_all_elements(

@@ -19,11 +19,8 @@ from regma.core import BoundField
 from regma.core import Chain
 from regma.core import Delimiter
 from regma.core import FieldReference
-from regma.core import FormatableNode
 from regma.core import Separator
 from regma.core import Strictness
-from regma.engine import AbstractRegexEngine
-from regma.engine import BuiltinRegexEngine
 from regma.error import DefinitionError
 from regma.error import ParseError
 from regma.field import ModelField
@@ -33,71 +30,81 @@ from regma.field import integer
 from regma.field import string
 from regma.validation.field import FieldNameValidator
 from regma.validation.field import FieldReferenceValidator
-from regma.validation.fsm import FsmNodeBuilder
+from regma.validation.fsm import FsmBuilder
 from regma.validation.fsm import FsmRegexCache
 from regma.validation.fsm import TemplateHasNoCollision
 from regma.validation.fsm import TemplateHasNoEmptyToken
 
 
+def _get_reference(model_cls: TemplateModelMeta, attribute_name: str) -> FieldReference:
+    """Return the field reference of the given attribute."""
+    # Find the targeted field
+    attributes = attribute_name.split(".")
+    field_reference: FieldReference | None = None
+    lookup_obj = model_cls
+    attribute_full_name = ""
+    for attr in attributes:
+        if not attr:
+            continue
+
+        attribute_full_name += attr
+
+        try:
+            lookup_obj = getattr(lookup_obj, attr)
+        except AttributeError as e:
+            msg = (
+                f"{model_cls.__name__}: "
+                f"could not find attribute {attr!r} in {lookup_obj}"
+            )
+            raise DefinitionError(msg) from e
+
+        if not isinstance(lookup_obj, AbstractField):
+            msg = (
+                f"{model_cls.__name__}: "
+                f"attribute {attribute_full_name!r} is not an AbstractField"
+            )
+            raise DefinitionError(msg)
+
+        field_reference = FieldReference(attribute_full_name, lookup_obj)
+        attribute_full_name += "."
+
+    if field_reference is None:
+        msg = f"Invalid attribute {attribute_name}"
+        raise DefinitionError(msg)
+
+    return field_reference
+
+
 def _parse_template(template_model: TemplateModelMeta) -> Chain:
-    """Convert a template string into a :class:`~regma.core.Chain`."""
+    """Convert a template string into a chain."""
     template = template_model.__template__
     delimiter = template_model.__delimiter__
     token_re = delimiter.token_re()
-    nodes: list[FormatableNode] = []
+    nodes: list[Separator | FieldReference] = []
     cursor = 0
-    existing_field_references: dict[str, FieldReference] = {}
 
     for m in token_re.finditer(template):
         start, end = m.span()
         attr_name: str = m.group(1)
 
-        attributes = attr_name.split(".")
-
         if start > cursor:
             nodes.append(Separator(template[cursor:start]))
 
-        # Find the targeted field
-        field_reference: FieldReference | None = None
-        lookup_obj = template_model
-        attribute_full_name = ""
-        for attr in attributes:
-            if not attr:
-                continue
+        field_reference = _get_reference(template_model, attr_name)
+        target = field_reference.target
+        # If we are referencing a model, we can reconstruct nodes from its chain
+        # This is to flatten the chain to atomic elements.
+        if isinstance(target, ModelField):
+            original_nodes = target.model.__chain__.nodes
+            for node in original_nodes:
+                if isinstance(node, FieldReference):
+                    new_node = FieldReference(f"{attr_name}.{node.name}", node.target)
+                else:
+                    new_node = node
+                nodes.append(new_node)
+        else:
+            nodes.append(field_reference)
 
-            attribute_full_name += attr
-            field_reference = existing_field_references.get(attr)
-
-            if field_reference:
-                lookup_obj = getattr(lookup_obj, attr)
-                field_reference = FieldReference(attribute_full_name, lookup_obj)
-                attribute_full_name += "."
-                continue
-
-            try:
-                lookup_obj = getattr(lookup_obj, attr)
-            except AttributeError as e:
-                msg = (
-                    f"{template_model.__name__}: in reference {m.group()}, "
-                    f"could not find attribute {attr!r} in {lookup_obj}"
-                )
-                raise DefinitionError(msg) from e
-
-            if not isinstance(lookup_obj, AbstractField):
-                msg = (
-                    f"{template_model.__name__}: in reference {m.group()}, "
-                    f"attribute {attribute_full_name!r} is not an AbstractField"
-                )
-                raise DefinitionError(msg)
-            field_reference = FieldReference(attribute_full_name, lookup_obj)
-            existing_field_references[attribute_full_name] = field_reference
-            attribute_full_name += "."
-
-        if field_reference is None:
-            msg = f"Invalid attribute {attr_name}"
-            raise DefinitionError(msg)
-
-        nodes.append(field_reference)
         cursor = end
 
     if cursor < len(template):
@@ -199,25 +206,10 @@ class TemplateModelMeta(type):
         __chain: Chain = _parse_template(cls)
         cls.__chain__ = __chain
         FieldReferenceValidator().validate(cls)
-        __fsm_builder = FsmNodeBuilder(FsmRegexCache())
+        __fsm_builder = FsmBuilder(FsmRegexCache())
         TemplateHasNoEmptyToken(__fsm_builder).validate(cls)
         TemplateHasNoCollision(__fsm_builder).validate(cls)
-
-        # Go through all bases to get the regex engine
-        __regex_engines = (c.get("__regex_engine__") for c in __contents)
-        __regex_engine_cls = next(d for d in __regex_engines if d is not None)
-
-        if not isinstance(__regex_engine_cls, type) or not issubclass(
-            __regex_engine_cls, AbstractRegexEngine
-        ):
-            msg = (
-                f"{name}: __regex_engine__ must be of type "
-                f"{AbstractRegexEngine.__name__}, "
-                f"got {type(__regex_engine_cls).__name__!r}"
-            )
-            raise DefinitionError(msg)
-
-        cls.__regex__ = cls.__chain__.to_regex(__regex_engine_cls())
+        cls.__regex__ = cls.__chain__.to_regex()
 
         return cls
 
@@ -250,7 +242,6 @@ class TemplateModel(metaclass=TemplateModelMeta):
     __typed_fields__: dict[str, BoundField[AbstractField[Any]]]
     __fields__: dict[str, BoundField[AbstractField[Any]]]
     __model_fields__: dict[str, BoundField[ModelField[TemplateModel]]]
-    __regex_engine__: type[AbstractRegexEngine] = BuiltinRegexEngine
     __template__: str
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401

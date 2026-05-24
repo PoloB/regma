@@ -32,15 +32,6 @@ def test_model_fails_with_wrong_delimiter_type() -> None:
             __delimiter__ = "wrong"  # type: ignore[assignment]
 
 
-def test_model_fails_with_wrong_regex_engine_type() -> None:
-    """Definition of template model fails if wrong regex engine type is provided."""
-    with pytest.raises(DefinitionError):
-
-        class TestModel(TemplateModel):
-            __template__ = "test"
-            __regex_engine__ = "wrong"  # type: ignore[assignment]
-
-
 def test_validate_simple_model() -> None:
     """Models are valid if they provide at least a template."""
 
@@ -95,6 +86,23 @@ def test_model_can_reference_field_multiple_times() -> None:
     assert TestModel.__regex__ == r"(?P<test>\w+)/(?P=test)"
 
 
+def test_reuse_leaves_ambiguity() -> None:
+    """Reusing a field shall leave ambiguity if possible.
+
+    When the reuse of a field is not taken into account, we may find a collision where
+    it is not possible because the value of the field is fixed due to an earlier valid
+    use.
+    In this example, the first appearing of bar fixes its value and thus, {bar}_{test}
+    cannot create a collision.
+    """
+
+    class _TestModel(TemplateModel):
+        __template__ = "{bar}_{foo}_{bar}_{test}"
+        foo: str = string(r"[a-zA-Z0-9]+")
+        bar: str = string(r"\w+")
+        test: str = string(r"\w+")
+
+
 def test_model_can_reference_other_models_through_model_field() -> None:
     """A model can reference other models through the model field."""
 
@@ -112,9 +120,9 @@ def test_model_can_reference_other_models_through_model_field() -> None:
     assert len(SecondModel.__typed_fields__) == 2  # noqa: PLR2004
     assert len(SecondModel.__model_fields__) == 1
     assert (
-        SecondModel.__regex__
-        == r"(?P<foo>[a-zA-Z0-9]+)/(?P<bar>\w+)/(?P<first>(?P<first__foo>[a-zA-Z0-9]+)"
-        r"_(?P<first__bar>\w+))/(?P=first__foo)_(?P=foo)_(?P=bar)_(?P=first__bar)_(?P=first)"
+        SecondModel.__regex__ == r"(?P<foo>[a-zA-Z0-9]+)/(?P<bar>\w+)/"
+        r"(?P<first__foo>[a-zA-Z0-9]+)_(?P<first__bar>\w+)/"
+        r"(?P=first__foo)_(?P=foo)_(?P=bar)_(?P=first__bar)_(?P=first__foo)_(?P=first__bar)"
     )
     assert (
         re.match(SecondModel.__regex__, "foo/bar/ffoo_fbar/ffoo_foo_bar_fbar_ffoo_fbar")

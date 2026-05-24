@@ -2,23 +2,22 @@
 
 from __future__ import annotations
 
+import greenery
 import pytest
 
 from regma import TemplateModel
 from regma import string
-from regma.core import BoundField
 from regma.core import Chain
+from regma.core import FieldReference
 from regma.core import Separator
 from regma.error import ValidityError
 from regma.field import StrField
 from regma.validation.fsm import CollisionResult
+from regma.validation.fsm import FsmBuilder
 from regma.validation.fsm import FsmChain
-from regma.validation.fsm import FsmNode
-from regma.validation.fsm import FsmNodeBuilder
 from regma.validation.fsm import FsmRegexCache
 from regma.validation.fsm import TemplateHasNoCollision
 from regma.validation.fsm import TemplateHasNoEmptyToken
-from regma.validation.fsm import ValidationRegexEngine
 from regma.validation.fsm import compute_collision
 
 
@@ -36,28 +35,25 @@ def simple_model() -> type[TemplateModel]:
 
 
 @pytest.fixture
-def fsm_builder() -> FsmNodeBuilder:
+def fsm_builder() -> FsmBuilder:
     """Return a FsmNodeBuilder object."""
-    return FsmNodeBuilder(FsmRegexCache())
+    return FsmBuilder(FsmRegexCache())
 
 
 def test_fsm_builder_cache() -> None:
     """Verify the cache of fsm builder is working."""
     fsm_cache = FsmRegexCache()
-    engine = ValidationRegexEngine()
-    fsm_node_builder = FsmNodeBuilder(fsm_cache, engine)
-    bound_field = BoundField("test", StrField(".+"))
-    fsm_node = fsm_node_builder.build_node_fsm(bound_field)
-    assert isinstance(fsm_node, FsmNode)
-    assert fsm_node.node is bound_field
-    regex = bound_field.to_regex(engine)
-    assert fsm_cache.get_fsm(regex) is fsm_node.fsm
-    other_fsm_node = fsm_node_builder.build_node_fsm(bound_field)
-    assert fsm_node.fsm == other_fsm_node.fsm
-    assert fsm_node.node == other_fsm_node.node
+    fsm_builder = FsmBuilder(fsm_cache)
+    field = FieldReference("test", StrField(".+"))
+    regex = field.to_regex()
+    fsm = fsm_builder.build_fsm(regex)
+    assert isinstance(fsm, greenery.Fsm)
+    assert fsm_cache.get_fsm(regex) is fsm
+    cached_fsm = fsm_builder.build_fsm(regex)
+    assert cached_fsm is fsm
 
 
-def test_compute_collision_with_empty_chain(fsm_builder: FsmNodeBuilder) -> None:
+def test_compute_collision_with_empty_chain(fsm_builder: FsmBuilder) -> None:
     """Make sure the compute collision return a valid collision result when empty."""
     fsm_chain = FsmChain.from_chain(Chain([]), fsm_builder)
     result = compute_collision(fsm_chain)
@@ -65,7 +61,7 @@ def test_compute_collision_with_empty_chain(fsm_builder: FsmNodeBuilder) -> None
     assert not result.has_collision()
 
 
-def test_separator_only_chain_is_always_valid(fsm_builder: FsmNodeBuilder) -> None:
+def test_separator_only_chain_is_always_valid(fsm_builder: FsmBuilder) -> None:
     """Make sure a separator only chain is always valid."""
     fsm_chain = FsmChain.from_chain(Chain([Separator("test")]), fsm_builder)
     result = compute_collision(fsm_chain)
@@ -74,7 +70,7 @@ def test_separator_only_chain_is_always_valid(fsm_builder: FsmNodeBuilder) -> No
 
 
 def test_simple_model_has_no_empty_tokens(
-    fsm_builder: FsmNodeBuilder, simple_model: type[TemplateModel]
+    fsm_builder: FsmBuilder, simple_model: type[TemplateModel]
 ) -> None:
     """Test the simple model has no empty tokens."""
     TemplateHasNoEmptyToken(fsm_builder).validate(simple_model)
@@ -92,13 +88,13 @@ def test_model_with_empty_tokens_fail_validation() -> None:
 
 
 def test_simple_model_has_no_collision(
-    fsm_builder: FsmNodeBuilder, simple_model: type[TemplateModel]
+    fsm_builder: FsmBuilder, simple_model: type[TemplateModel]
 ) -> None:
     """Make sure the simple test model is valid."""
     TemplateHasNoCollision(fsm_builder).validate(simple_model)
 
 
-def test_separator_are_used_in_construction(fsm_builder: FsmNodeBuilder) -> None:
+def test_separator_are_used_in_construction(fsm_builder: FsmBuilder) -> None:
     """Make sure separator are taken into consideration when checking collision."""
 
     class _TestModel(TemplateModel):
@@ -111,11 +107,11 @@ def test_separator_are_used_in_construction(fsm_builder: FsmNodeBuilder) -> None
 
 def test_success_on_complex_example() -> None:
     """Make sure a more complex regex template also works."""
+
     class _TestModel(TemplateModel):
         foo: str = string(r"[a-z][a-z_]+")
         bar: str = string(r"[a-z]+")
         __template__ = "{foo}_{bar}"
-
 
 
 def test_failing_on_colliding_model() -> None:
@@ -124,5 +120,5 @@ def test_failing_on_colliding_model() -> None:
 
         class _TestModel(TemplateModel):
             __template__ = "start_{foo}_{bar}_end"
-            foo: str = string(r"[a-z_]+")
-            bar: str = string(r"[a-z_]+")
+            foo: str = string(r".+")
+            bar: str = string(r"[^a]+")

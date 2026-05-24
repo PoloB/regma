@@ -12,7 +12,6 @@ from regma.core import Delimiter
 from regma.core import FieldReference
 from regma.core import Separator
 from regma.core import Strictness
-from regma.engine import BuiltinRegexEngine
 from regma.field import IntField
 from regma.field import StrField
 from tests.conftest import AbstractTestField
@@ -32,14 +31,7 @@ def test_chain_init() -> None:
 def test_chain_regex() -> None:
     """Chain shall return expected regex."""
     chain = Chain([Separator("test1"), Separator("test2")])
-    regex_builder = BuiltinRegexEngine()
-    assert chain.to_regex(regex_builder) == r"test1test2"
-
-
-def test_chain_to_chain() -> None:
-    """Chain shall return itself as chain."""
-    chain = Chain([Separator("test"), Separator("test2")])
-    assert chain.to_chain() is chain
+    assert chain.to_regex() == r"test1test2"
 
 
 def test_chain_format() -> None:
@@ -57,15 +49,7 @@ def test_separator_init() -> None:
 def test_separator_regex() -> None:
     """Separator shall return expected regex."""
     separator = Separator("test")
-    assert separator.to_regex(BuiltinRegexEngine()) == "test"
-
-
-def test_separator_to_chain() -> None:
-    """Separator shall return a chain with only itself."""
-    separator = Separator("test")
-    chain = separator.to_chain()
-    assert isinstance(chain, Chain)
-    assert chain.nodes == [separator]
+    assert separator.to_regex() == "test"
 
 
 @pytest.mark.parametrize(
@@ -93,8 +77,7 @@ def test_abstract_field_init() -> None:
     field = AbstractTestField()
     assert field.strictness == Strictness.ALL
     assert field.get_supported_types() == (str,)
-    regex_engine = BuiltinRegexEngine()
-    assert field.to_regex(regex_engine) == ".+"
+    assert field.to_regex() == ".+"
 
 
 def test_abstract_field_parse_value() -> None:
@@ -156,18 +139,7 @@ def test_bound_field_init() -> None:
 def test_bound_field_regex() -> None:
     """Bound field regex behaves as expected."""
     bound_field = BoundField("attr", StrField(r"\w+"))
-    regex_engine = BuiltinRegexEngine()
-    assert bound_field.to_regex(regex_engine) == r"(?P<attr>\w+)"
-    # Calling it again with the same regex engine shall reuse
-    assert bound_field.to_regex(regex_engine) == r"(?P=attr)"
-
-
-def test_bound_field_to_chain() -> None:
-    """Bound field to_chain behaves as expected."""
-    bound_field = BoundField("attr", StrField(r"\w+"))
-    chain = bound_field.to_chain()
-    assert isinstance(chain, Chain)
-    assert chain.nodes == [bound_field]
+    assert bound_field.to_regex() == r"\w+"
 
 
 def test_bound_field_format() -> None:
@@ -187,15 +159,7 @@ def test_field_reference_init() -> None:
 def test_field_reference_to_regex() -> None:
     """Test the field reference regex construction."""
     field_ref = FieldReference("foo.bar", StrField(r"\w+"))
-    regex_builder = BuiltinRegexEngine()
-    assert field_ref.to_regex(regex_builder) == r"(?P<foo__bar>\w+)"
-
-
-def test_field_reference_to_chain() -> None:
-    """Test the field reference chain construction."""
-    field_ref = FieldReference("foo.bar", StrField(r"\w+"))
-    chain = field_ref.to_chain()
-    assert chain.nodes == [field_ref]
+    assert field_ref.to_regex() == r"\w+"
 
 
 def test_field_reference_format() -> None:

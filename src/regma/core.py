@@ -18,7 +18,6 @@ from regma.error import ParseError
 from regma.error import ValidationError
 
 if TYPE_CHECKING:
-    from regma.engine import AbstractRegexEngine
     from regma.model import TemplateModel
 
 
@@ -26,49 +25,66 @@ class TemplateNode(abc.ABC):
     """Anything that can participate in a template chain."""
 
     @abc.abstractmethod
-    def to_regex(self, engine: AbstractRegexEngine) -> str:
+    def to_regex(self) -> str:
         """Return the element as a regex."""
 
 
-class FormatableNode(TemplateNode, abc.ABC):
+class FormatNode(TemplateNode):
     """A node that can contribute to formatting a template model."""
-
-    @abc.abstractmethod
-    def to_chain(self) -> Chain:
-        """Return as a chain of inner template nodes."""
 
     @abc.abstractmethod
     def format(self, model: TemplateModel) -> str:
         """Return the formatted string of this template node."""
 
 
-class Chain(FormatableNode):
+class Chain(FormatNode):
     """Ordered sequence of template nodes."""
 
-    def __init__(self, nodes: list[FormatableNode]) -> None:
+    def __init__(self, nodes: list[Separator | FieldReference]) -> None:
         """Initialize the chain."""
         self._nodes = nodes
+        self._fields = [n for n in nodes if isinstance(n, FieldReference)]
+
+        self._field_reuse: dict[Separator | FieldReference, bool] = {}
+        seen_fields: set[str] = set()
+
+        for field in self._fields:
+            reuse = field.name in seen_fields
+            self._field_reuse[field] = reuse
+            seen_fields.add(field.name)
 
     @property
-    def nodes(self) -> list[FormatableNode]:
+    def nodes(self) -> list[Separator | FieldReference]:
         """Return the ordered sequence of template nodes."""
         return self._nodes
 
     @override
-    def to_regex(self, engine: AbstractRegexEngine) -> str:
-        return "".join(n.to_regex(engine) for n in self._nodes)
+    def to_regex(self) -> str:
+        regexes = []
+        for node in self._nodes:
+            if isinstance(node, Separator):
+                regexes.append(node.to_regex())
+                continue
 
-    @override
-    def to_chain(self) -> Chain:
-        return self
+            field_name = node.name.replace(".", "__")
+            if self._field_reuse.get(node, False):
+                regex = rf"(?P={field_name})"
+            else:
+                regex = rf"(?P<{field_name}>{node.to_regex()})"
+            regexes.append(regex)
+        return "".join(regexes)
 
     @override
     def format(self, model: TemplateModel) -> str:
         """Return the formatted string of this chain."""
         return "".join(n.format(model) for n in self._nodes)
 
+    def is_field_reused(self, field: Separator | FieldReference) -> bool:
+        """Return if given field is already used earlier in the chain."""
+        return self._field_reuse.get(field, False)
 
-class Separator(FormatableNode):
+
+class Separator(FormatNode):
     """A literal string fragment in a chain."""
 
     def __init__(self, value: str) -> None:
@@ -76,12 +92,8 @@ class Separator(FormatableNode):
         self.value = value
 
     @override
-    def to_regex(self, engine: AbstractRegexEngine) -> str:
+    def to_regex(self) -> str:
         return re.escape(self.value)
-
-    @override
-    def to_chain(self) -> Chain:
-        return Chain([self])
 
     @override
     def format(self, model: TemplateModel) -> str:
@@ -201,7 +213,7 @@ class Delimiter(enum.Enum):
 T_field = TypeVar("T_field", bound=AbstractField[Any])
 
 
-class BoundField(FormatableNode, Generic[T_field]):
+class BoundField(FormatNode, Generic[T_field]):
     """A field bound to a template model through an attribute."""
 
     def __init__(self, name: str, field: T_field) -> None:
@@ -231,19 +243,15 @@ class BoundField(FormatableNode, Generic[T_field]):
         return self._field
 
     @override
-    def to_chain(self) -> Chain:
-        return Chain([self])
-
-    @override
-    def to_regex(self, engine: AbstractRegexEngine) -> str:
-        return engine.build(self._name, self._field)
+    def to_regex(self) -> str:
+        return self._field.to_regex()
 
     @override
     def format(self, model_inst: TemplateModel) -> str:
         return self._field.format_value(getattr(model_inst, self._name))
 
 
-class FieldReference(FormatableNode):
+class FieldReference(FormatNode):
     """A referenced field in a model template.
 
     This is used in the template parsing.
@@ -265,12 +273,8 @@ class FieldReference(FormatableNode):
         return self._field
 
     @override
-    def to_regex(self, engine: AbstractRegexEngine) -> str:
-        return engine.build(self.__name, self._field)
-
-    @override
-    def to_chain(self) -> Chain:
-        return Chain([self])
+    def to_regex(self) -> str:
+        return self.target.to_regex()
 
     @override
     def format(self, model: TemplateModel) -> str:

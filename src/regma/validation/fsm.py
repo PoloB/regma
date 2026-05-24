@@ -11,29 +11,14 @@ import greenery
 
 from regma.core import BoundField
 from regma.core import FieldReference
-from regma.core import FormatableNode
 from regma.core import Separator
-from regma.engine import AbstractRegexEngine
 from regma.error import ValidityError
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from regma import TemplateNode
     from regma.core import Chain
     from regma.model import TemplateModelMeta
-
-
-class ValidationRegexEngine(AbstractRegexEngine):
-    """Engine used to create the patterns for validation.
-
-    It will not insert any unsupported features in the pattern that greenery will not
-    support as FSM (like back references or back tracking)
-    """
-
-    def build(self, _: str, template_node: TemplateNode) -> str:
-        """Build the regex for the given field name and pattern."""
-        return template_node.to_regex(self)
 
 
 def _left_reminder(fsm: greenery.Fsm) -> greenery.Fsm:
@@ -146,14 +131,17 @@ def _trim_left_reminder(fsm: greenery.Fsm) -> greenery.Fsm:
     return greenery.fsm.crawl(alphabet, frozenset(fsm.finals), final, follow).reduce()
 
 
-def _get_flat_charclass(charclass: greenery.Charclass) -> greenery.Charclass:
+def get_flat_charclass(charclass: greenery.Charclass) -> greenery.Charclass:
     """Return a random char from the given class."""
-    if not charclass.negated or not charclass.ord_ranges:
+    if not charclass.negated:
         return charclass
 
     # Construct a flat charclass from negated
     minimum = 0
     maximum = sys.maxunicode
+
+    if not charclass.ord_ranges:
+        return greenery.Charclass(((chr(minimum), chr(maximum)),))
 
     # Assume the ranges are ordered
     ranges: list[tuple[str, str]] = []
@@ -167,31 +155,39 @@ def _get_flat_charclass(charclass: greenery.Charclass) -> greenery.Charclass:
 
 
 def _get_shortest_path(fsm: greenery.Fsm) -> list[greenery.Charclass]:
-    current_level: list[tuple[int, list[greenery.Charclass]]] = [(fsm.initial, [])]
+
     visited = {fsm.initial}
 
-    while current_level:
+    def _get_current_level_path(
+        current_level: list[tuple[int, list[greenery.Charclass]]],
+    ) -> list[greenery.Charclass]:
         next_level = []
         for state, path in current_level:
             if state in fsm.finals:
                 return path
-            if state not in fsm.map:
-                continue
+            syms_by_next_state: dict[int, list[greenery.Charclass]] = collections.defaultdict(list)
+            identical_state = -1
             for sym, next_state in fsm.map[state].items():
-                if next_state in visited:
+                if next_state in visited and next_state != identical_state:
                     continue
+                syms_by_next_state[next_state].append(sym)
+                identical_state = next_state
                 visited.add(next_state)
-                next_level.append((next_state, [*path, sym]))
-        current_level = next_level
+            for next_state, syms in syms_by_next_state.items():
+                combined_charclass = greenery.Charclass()
+                for sym in syms:
+                    combined_charclass = combined_charclass.union(sym)
+                next_level.append((next_state, [*path, combined_charclass]))
+        return _get_current_level_path(next_level)
 
-    return []
+    return _get_current_level_path([(fsm.initial, [])])
 
 
 def _generate_example(fsm: greenery.Fsm) -> str:
     """Generate an example of string accepted by the given fsm."""
     charclass_path = _get_shortest_path(fsm)
     return "".join(
-        next(_get_flat_charclass(char).get_chars(), "") for char in charclass_path
+        next(get_flat_charclass(char).get_chars(), "") for char in charclass_path
     )
 
 
@@ -199,8 +195,9 @@ def _generate_example(fsm: greenery.Fsm) -> str:
 class FsmNode:
     """A finite state machine object corresponding to a template node."""
 
-    node: FormatableNode
+    node: Separator | FieldReference
     fsm: greenery.Fsm
+    static: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -345,6 +342,7 @@ def compute_collision(chain: FsmChain) -> CollisionResult:
         return CollisionResult([])
 
     first_node = nodes[0]
+    previous_is_static = first_node.static
 
     # TODO(PoloB): we could do the parsing differently to avoid this assertion
     assert isinstance(first_node.node, FieldReference)  # noqa: S101
@@ -354,6 +352,7 @@ def compute_collision(chain: FsmChain) -> CollisionResult:
     current_fsm = current_node.fsm
 
     # Create frontiers between FieldReference
+    # We skip any frontier that has a static fsm node
     frontier_nodes: list[tuple[FsmFieldNode, FsmFieldNode]] = []
 
     for node in nodes[1:]:
@@ -366,9 +365,13 @@ def compute_collision(chain: FsmChain) -> CollisionResult:
             # Store the current fsm
             left_node = FsmFieldNode(current_node.field, current_fsm, current_separator)
             right_node = FsmFieldNode(node.node, node.fsm, "")
-            frontier_nodes.append((left_node, right_node))
             current_node = right_node
             current_fsm = current_node.fsm
+            if previous_is_static or node.static:
+                previous_is_static = node.static
+                continue
+            previous_is_static = node.static
+            frontier_nodes.append((left_node, right_node))
 
     frontier_decompositions: list[FsmFrontierDecomposition] = []
 
@@ -394,45 +397,42 @@ class FsmRegexCache:
         self._fsm_by_regex[regex] = fsm
 
 
-class FsmNodeBuilder:
-    """Builder of FSM node from TemplateNode.
+class FsmBuilder:
+    """Builder of FSM from regex.
 
-    Has an internal cache to avoid recomputing FSM from the same template node multiple
-    times.
+    Has internal cache to avoid recomputing FSM from the same regex node multiple times.
     """
 
-    def __init__(
-        self, cache: FsmRegexCache, regex_engine: AbstractRegexEngine | None = None
-    ) -> None:
+    def __init__(self, cache: FsmRegexCache) -> None:
         """Initialize a FSMNodeBuilder object."""
         self._cache = cache
-        self._engine = regex_engine or ValidationRegexEngine()
 
-    def build_node_fsm(self, node: FormatableNode) -> FsmNode:
+    def build_fsm(self, regex: str) -> greenery.Fsm:
         """Build an FSM node from TemplateNode."""
-        regex = self._engine.build("", node)
         fsm = self._cache.get_fsm(regex)
         if fsm is not None:
-            return FsmNode(node, fsm)
+            return fsm
 
         # Build the fsm
         fsm = greenery.parse(regex).to_fsm()
         self._cache.push_fsm(regex, fsm)
-        return FsmNode(node, fsm)
+        return fsm
 
 
 class FsmChain:
     """A chain of finite state machines."""
 
     @classmethod
-    def from_chain(cls, chain: Chain, builder: FsmNodeBuilder) -> FsmChain:
+    def from_chain(cls, chain: Chain, builder: FsmBuilder) -> FsmChain:
         """Create a FsmChain from a template chain."""
         nodes = chain.nodes
 
         fsm_nodes: list[FsmNode] = []
 
         for node in nodes:
-            fsm_node = builder.build_node_fsm(node)
+            regex = node.to_regex()
+            fsm = builder.build_fsm(regex)
+            fsm_node = FsmNode(node, fsm, chain.is_field_reused(node))
             fsm_nodes.append(fsm_node)
 
         return cls(fsm_nodes)
@@ -449,7 +449,7 @@ class FsmChain:
 class TemplateHasNoCollision:
     """Validate a template has no collision."""
 
-    def __init__(self, fsm_builder: FsmNodeBuilder) -> None:
+    def __init__(self, fsm_builder: FsmBuilder) -> None:
         """Initialize the validator."""
         self._fsm_builder = fsm_builder
 
@@ -481,7 +481,7 @@ class TemplateHasNoCollision:
 class TemplateHasNoEmptyToken:
     """Validate a template has no empty token."""
 
-    def __init__(self, fsm_builder: FsmNodeBuilder) -> None:
+    def __init__(self, fsm_builder: FsmBuilder) -> None:
         """Initialize the validator."""
         self._fsm_builder = fsm_builder
 

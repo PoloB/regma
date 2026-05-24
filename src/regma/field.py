@@ -16,7 +16,6 @@ from regma.error import DefinitionError
 from regma.error import ValidationError
 
 if TYPE_CHECKING:
-    from regma.engine import AbstractRegexEngine
     from regma.model import TemplateModel
 
 T_field = TypeVar("T_field")
@@ -36,7 +35,7 @@ class PatternField(AbstractField[T_field], abc.ABC):
         return self._pattern
 
     @override
-    def to_regex(self, engine: AbstractRegexEngine) -> str:
+    def to_regex(self) -> str:
         return self.pattern
 
 
@@ -195,8 +194,8 @@ class CustomField(AbstractField[T_field]):
         return self._custom_field
 
     @override
-    def to_regex(self, engine: AbstractRegexEngine) -> str:
-        return self._custom_field.to_regex(engine)
+    def to_regex(self) -> str:
+        return self._custom_field.to_regex()
 
     @override
     def get_supported_types(self) -> tuple[type[T_field]]:
@@ -239,8 +238,8 @@ class ModelField(AbstractField[T_field_model]):
         return self._model
 
     @override
-    def to_regex(self, engine: AbstractRegexEngine) -> str:
-        return self._model.__chain__.to_regex(engine)
+    def to_regex(self) -> str:
+        return self._model.__chain__.to_regex()
 
     @override
     def get_supported_types(self) -> tuple[type[T_field_model]]:
