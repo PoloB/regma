@@ -7,6 +7,7 @@ import pytest
 from regma import DefinitionError
 from regma import ParseError
 from regma import TemplateModel
+from regma.error import ValidationError
 from regma.field import integer
 from regma.field import reference
 from regma.field import string
@@ -29,15 +30,6 @@ def test_model_fails_with_wrong_delimiter_type() -> None:
         class TestModel(TemplateModel):
             __template__ = "test"
             __delimiter__ = "wrong"  # type: ignore[assignment]
-
-
-def test_model_fails_with_wrong_regex_engine_type() -> None:
-    """Definition of template model fails if wrong regex engine type is provided."""
-    with pytest.raises(DefinitionError):
-
-        class TestModel(TemplateModel):
-            __template__ = "test"
-            __regex_engine__ = "wrong"  # type: ignore[assignment]
 
 
 def test_validate_simple_model() -> None:
@@ -64,7 +56,8 @@ def test_fields_are_extracted_correctly() -> None:
 
     assert len(TestModel.__typed_fields__) == 1
     assert "test" in TestModel.__typed_fields__
-    assert len(TestModel.__chain__.nodes) == 1
+    assert TestModel.__chain__.start_separator.value == ""
+    assert len(list(TestModel.__chain__.iter_field_seps())) == 1
     assert TestModel.__regex__ == r"(?P<test>\w+)"
 
 
@@ -77,7 +70,11 @@ def test_sep_fields_are_extracted_correctly() -> None:
 
     assert len(TestModel.__typed_fields__) == 1
     assert "test" in TestModel.__typed_fields__
-    assert len(TestModel.__chain__.nodes) == 3  # noqa: PLR2004
+    assert TestModel.__chain__.start_separator.value == "sep"
+    field_seps = list(TestModel.__chain__.iter_field_seps())
+    assert len(field_seps) == 1
+    assert field_seps[0].field.name == "test"
+    assert field_seps[0].separator.value == "other"
     assert TestModel.__regex__ == r"sep(?P<test>\w+)other"
 
 
@@ -90,8 +87,25 @@ def test_model_can_reference_field_multiple_times() -> None:
 
     assert len(TestModel.__typed_fields__) == 1
     assert "test" in TestModel.__typed_fields__
-    assert len(TestModel.__chain__.nodes) == 3  # noqa: PLR2004
+    assert len(list(TestModel.__chain__.iter_field_seps())) == 2  # noqa: PLR2004
     assert TestModel.__regex__ == r"(?P<test>\w+)/(?P=test)"
+
+
+def test_reuse_leaves_ambiguity() -> None:
+    """Reusing a field shall leave ambiguity if possible.
+
+    When the reuse of a field is not taken into account, we may find a collision where
+    it is not possible because the value of the field is fixed due to an earlier valid
+    use.
+    In this example, the first appearing of bar fixes its value and thus, {bar}_{test}
+    cannot create a collision.
+    """
+
+    class _TestModel(TemplateModel):
+        __template__ = "{bar}_{foo}_{bar}_{test}"
+        foo: str = string(r"[a-zA-Z0-9]+")
+        bar: str = string(r"\w+")
+        test: str = string(r"\w+")
 
 
 def test_model_can_reference_other_models_through_model_field() -> None:
@@ -99,21 +113,21 @@ def test_model_can_reference_other_models_through_model_field() -> None:
 
     class FirstModel(TemplateModel):
         __template__ = "{foo}_{bar}"
-        foo: str = string(r"\w+")
+        foo: str = string(r"[a-zA-Z0-9]+")
         bar: str = string(r"\w+")
 
     class SecondModel(TemplateModel):
         __template__ = "{foo}/{bar}/{first}/{first.foo}_{foo}_{bar}_{first.bar}_{first}"
-        foo: str = string(r"\w+")
+        foo: str = string(r"[a-zA-Z0-9]+")
         bar: str = string(r"\w+")
         first: FirstModel = reference(FirstModel)
 
     assert len(SecondModel.__typed_fields__) == 2  # noqa: PLR2004
     assert len(SecondModel.__model_fields__) == 1
     assert (
-        SecondModel.__regex__
-        == r"(?P<foo>\w+)/(?P<bar>\w+)/(?P<first>(?P<first__foo>\w+)"
-        r"_(?P<first__bar>\w+))/(?P=first__foo)_(?P=foo)_(?P=bar)_(?P=first__bar)_(?P=first)"
+        SecondModel.__regex__ == r"(?P<foo>[a-zA-Z0-9]+)/(?P<bar>\w+)/"
+        r"(?P<first__foo>[a-zA-Z0-9]+)_(?P<first__bar>\w+)/"
+        r"(?P=first__foo)_(?P=foo)_(?P=bar)_(?P=first__bar)_(?P=first__foo)_(?P=first__bar)"
     )
     assert (
         re.match(SecondModel.__regex__, "foo/bar/ffoo_fbar/ffoo_foo_bar_fbar_ffoo_fbar")
@@ -132,7 +146,7 @@ def test_definition_fails_referencing_unknown_field() -> None:
 
 def test_definition_fails_if_field_ends_with_underscore() -> None:
     """Definition of model shall fail if the field ends with underscore."""
-    with pytest.raises(DefinitionError):
+    with pytest.raises(ValidationError):
 
         class TestModel(TemplateModel):
             __template__ = "{test_}"
@@ -145,7 +159,7 @@ def test_definition_fails_if_field_contain_double_underscore() -> None:
     We need this to make sure there is no collision between the name of the field and
     the __ used as separator in capturing groups.
     """
-    with pytest.raises(DefinitionError):
+    with pytest.raises(ValidationError):
 
         class TestModel(TemplateModel):
             __template__ = "{foo__bar}"
@@ -171,11 +185,11 @@ def test_definition_fails_with_missing_attribute() -> None:
 
 def test_definition_fails_with_missing_model_field() -> None:
     """Definition oif model fails if all the fields are not used in the template."""
-    with pytest.raises(DefinitionError):
+    with pytest.raises(ValidationError):
 
         class TestModel(TemplateModel):
             __template__ = "{foo}"
-            foo: str = string(r"\w+")
+            foo: str = string(r"[a-zA-Z0-9]+")
             bar: str = string(r"\w+")
 
 
@@ -184,14 +198,14 @@ def test_definition_fails_with_missing_sub_model_field() -> None:
 
     class FirstModel(TemplateModel):
         __template__ = "{foo}_{bar}"
-        foo: str = string(r"\w+")
+        foo: str = string(r"[a-zA-Z0-9]+")
         bar: str = string(r"\w+")
 
-    with pytest.raises(DefinitionError):
+    with pytest.raises(ValidationError):
 
         class SecondModel(TemplateModel):
             __template__ = "{foo}/{bar}/{first.foo}"  # first.bar is missing
-            foo: str = string(r"\w+")
+            foo: str = string(r"[a-zA-Z0-9]+")
             bar: str = string(r"\w+")
             first: FirstModel = reference(FirstModel)
 
@@ -222,7 +236,7 @@ def test_model_eq_different_type() -> None:
 
     class OtherFooBarModel(TemplateModel):
         __template__ = "{foo}_{bar}"
-        foo: str = string(r"\w+")
+        foo: str = string(r"[a-zA-Z0-9]+")
         bar: int = integer()
 
     mode1 = FooBarModel("test", 1)

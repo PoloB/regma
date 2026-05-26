@@ -11,7 +11,6 @@ from regma import integer
 from regma import reference
 from regma import string
 from regma.core import Strictness
-from regma.engine import BuiltinRegexEngine
 from regma.field import ChoiceField
 from regma.field import CustomField
 from regma.field import IntField
@@ -32,8 +31,7 @@ def test_str_field_pattern_init() -> None:
 
 def test_str_field_regex() -> None:
     """Regex returned by StrField shall be the same as initialized."""
-    engine = BuiltinRegexEngine()
-    assert StrField(".+").to_regex(engine) == ".+"
+    assert StrField(".+").to_regex() == ".+"
 
 
 def test_str_field_extract_value() -> None:
@@ -71,8 +69,7 @@ def test_int_field_default_init() -> None:
 
 def test_int_field_regex() -> None:
     """Regex returned by IntField shall be the same as initialized."""
-    engine = BuiltinRegexEngine()
-    assert IntField().to_regex(engine) == r"\d+"
+    assert IntField().to_regex() == r"\d+"
 
 
 def test_int_field_minimum_greater_than_maximum() -> None:
@@ -188,8 +185,7 @@ def test_choice_field_init() -> None:
 
 def test_choice_field_regex() -> None:
     """Regex returned by ChoiceField shall be the same as initialized."""
-    engine = BuiltinRegexEngine()
-    assert ChoiceField(["test", "test1"]).to_regex(engine) == r"(?:test|test1)"
+    assert ChoiceField(["test", "test1"]).to_regex() == r"(?:test|test1)"
 
 
 def test_choice_field_extract_value() -> None:
@@ -232,9 +228,8 @@ def test_custom_field_init() -> None:
 
 def test_custom_field_regex() -> None:
     """Regex returned by CustomField is the same regex as the field itself."""
-    engine = BuiltinRegexEngine()
     field = IntChoiceField([0, 1])
-    assert CustomField(field).to_regex(engine) == field.to_regex(engine)
+    assert CustomField(field).to_regex() == field.to_regex()
 
 
 def test_custom_field_extract_value() -> None:
@@ -267,9 +262,8 @@ def test_model_field_init() -> None:
 
 def test_model_field_regex() -> None:
     """Regex returned by ModelField is the same regex as the model itself."""
-    engine = BuiltinRegexEngine()
     model_cls = SimpleTestModel
-    assert ModelField(model_cls).to_regex(engine) == model_cls.__regex__
+    assert ModelField(model_cls).to_regex() == model_cls.__regex__
 
 
 def test_model_field_extract_value() -> None:

@@ -6,7 +6,6 @@ from typing_extensions import override
 
 from regma import TemplateModel
 from regma.core import AbstractField
-from regma.engine import AbstractRegexEngine
 from regma.error import ValidationError
 from regma.field import integer
 from regma.field import string
@@ -16,7 +15,7 @@ class AbstractTestField(AbstractField[str]):
     """A basic field, as close as possible to abstract field."""
 
     @override
-    def to_regex(self, engine: AbstractRegexEngine) -> str:
+    def to_regex(self) -> str:
         return ".+"
 
     @override
@@ -65,7 +64,7 @@ class IntChoiceField(AbstractField[int]):
         return int(raw)
 
     @override
-    def to_regex(self, engine: AbstractRegexEngine) -> str:
+    def to_regex(self) -> str:
         pattern = "|".join(re.escape(str(c)) for c in self.choices)
         return rf"(?:{pattern})"
 
@@ -85,7 +84,7 @@ class FooBarModel(TemplateModel):
     """Model with two fields foo and bar."""
 
     __template__ = "{foo}_{bar}"
-    foo: str = string(r"\w+")
+    foo: str = string(r"[a-zA-Z0-9]+")
     bar: int = integer()
 
 
@@ -94,5 +93,5 @@ class ComplexModel(TemplateModel):
 
     __template__ = "/root/{foo_bar.foo}_{foo_bar.bar}_{foo}_{bar}"
     foo_bar: FooBarModel
-    foo: str = string(r"\w+")
+    foo: str = string(r"[a-zA-Z0-9]+")
     bar: int = integer()

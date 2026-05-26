@@ -1,5 +1,7 @@
 """regma.exceptions — all library-specific errors."""
 
+from __future__ import annotations
+
 
 class RegmaError(Exception):
     """Base for all regma errors."""
@@ -19,3 +21,7 @@ class FormatError(RegmaError):
 
 class DefinitionError(RegmaError):
     """Raised at class definition time when a TemplateModel is invalid."""
+
+
+class ValidityError(RegmaError):
+    """Exception raised when validation fails."""
