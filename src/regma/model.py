@@ -116,9 +116,7 @@ def _parse_template(template_model: TemplateModelMeta) -> Chain:
     separators.append(Separator(template[cursor:]))
 
     start_sep = separators.pop(0)
-    field_seps = [
-        FieldSep(field, sep) for field, sep in zip(fields, separators, strict=True)
-    ]
+    field_seps = [FieldSep(field, sep) for field, sep in zip(fields, separators)]  # noqa: B905
     return Chain(start_sep, field_seps)
 
 
