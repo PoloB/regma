@@ -19,6 +19,7 @@ from regma.core import BoundField
 from regma.core import Chain
 from regma.core import Delimiter
 from regma.core import FieldReference
+from regma.core import FieldSep
 from regma.core import Separator
 from regma.core import Strictness
 from regma.error import DefinitionError
@@ -80,37 +81,45 @@ def _parse_template(template_model: TemplateModelMeta) -> Chain:
     template = template_model.__template__
     delimiter = template_model.__delimiter__
     token_re = delimiter.token_re()
-    nodes: list[Separator | FieldReference] = []
+    pending_separator = ""
+    separators = []
+    fields: list[FieldReference] = []
     cursor = 0
 
     for m in token_re.finditer(template):
         start, end = m.span()
         attr_name: str = m.group(1)
 
-        if start > cursor:
-            nodes.append(Separator(template[cursor:start]))
-
+        separators.append(Separator(pending_separator + template[cursor:start]))
+        pending_separator = ""
         field_reference = _get_reference(template_model, attr_name)
         target = field_reference.target
         # If we are referencing a model, we can reconstruct nodes from its chain
         # This is to flatten the chain to atomic elements.
         if isinstance(target, ModelField):
-            original_nodes = target.model.__chain__.nodes
-            for node in original_nodes:
-                if isinstance(node, FieldReference):
-                    new_node = FieldReference(f"{attr_name}.{node.name}", node.target)
-                else:
-                    new_node = node
-                nodes.append(new_node)
+            chain: Chain = target.model.__chain__
+            separators[-1] = Separator(
+                separators[-1].value + chain.start_separator.value
+            )
+            for field_sep in chain.iter_field_seps():
+                field = field_sep.field
+                new_field = FieldReference(f"{attr_name}.{field.name}", field.target)
+                fields.append(new_field)
+                new_sep = Separator(field_sep.separator.value)
+                separators.append(new_sep)
+            pending_separator = separators.pop(-1).value
         else:
-            nodes.append(field_reference)
+            fields.append(field_reference)
 
         cursor = end
 
-    if cursor < len(template):
-        nodes.append(Separator(template[cursor:]))
+    separators.append(Separator(template[cursor:]))
 
-    return Chain(nodes)
+    start_sep = separators.pop(0)
+    field_seps = [
+        FieldSep(field, sep) for field, sep in zip(fields, separators, strict=True)
+    ]
+    return Chain(start_sep, field_seps)
 
 
 T_model = TypeVar("T_model", bound="TemplateModel")

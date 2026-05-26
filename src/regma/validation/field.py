@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 
 from typing_extensions import override
 
-from regma.core import FieldReference
 from regma.error import ValidationError
 from regma.validation.core import TemplateValidator
 
@@ -74,9 +73,7 @@ class FieldReferenceValidator(TemplateValidator):
                 )
 
         ref_fields = {
-            node.name
-            for node in model_cls.__chain__.nodes
-            if isinstance(node, FieldReference)
+            field_sep.field.name for field_sep in model_cls.__chain__.iter_field_seps()
         }
 
         _check_has_all_elements(model_cls, ref_fields, "")

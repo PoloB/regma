@@ -10,6 +10,7 @@ from regma.core import BoundField
 from regma.core import Chain
 from regma.core import Delimiter
 from regma.core import FieldReference
+from regma.core import FieldSep
 from regma.core import Separator
 from regma.core import Strictness
 from regma.field import IntField
@@ -22,22 +23,24 @@ from tests.conftest import SimpleTestModel
 
 def test_chain_init() -> None:
     """Chain shall initialize as expected."""
-    node1 = Separator("test")
-    node2 = Separator("test2")
-    chain = Chain([node1, node2])
-    assert chain.nodes == [node1, node2]
+    sep = Separator("test")
+    chain = Chain(sep, [])
+    assert chain.start_separator is sep
+    assert list(chain.iter_field_seps()) == []
 
 
 def test_chain_regex() -> None:
     """Chain shall return expected regex."""
-    chain = Chain([Separator("test1"), Separator("test2")])
-    assert chain.to_regex() == r"test1test2"
+    field_sep = FieldSep(FieldReference("test", StrField(".+")), Separator("end"))
+    chain = Chain(Separator("start"), [field_sep])
+    assert chain.to_regex() == r"start(?P<test>.+)end"
 
 
 def test_chain_format() -> None:
     """Chain shall return expected format."""
-    chain = Chain([Separator("test"), Separator("test2")])
-    assert chain.format(SimpleTestModel("test")) == "testtest2"
+    field_sep = FieldSep(FieldReference("test", StrField(".+")), Separator("end"))
+    chain = Chain(Separator("start"), [field_sep])
+    assert chain.format(SimpleTestModel("test")) == "starttestend"
 
 
 def test_separator_init() -> None:

@@ -56,7 +56,8 @@ def test_fields_are_extracted_correctly() -> None:
 
     assert len(TestModel.__typed_fields__) == 1
     assert "test" in TestModel.__typed_fields__
-    assert len(TestModel.__chain__.nodes) == 1
+    assert TestModel.__chain__.start_separator.value == ""
+    assert len(list(TestModel.__chain__.iter_field_seps())) == 1
     assert TestModel.__regex__ == r"(?P<test>\w+)"
 
 
@@ -69,7 +70,11 @@ def test_sep_fields_are_extracted_correctly() -> None:
 
     assert len(TestModel.__typed_fields__) == 1
     assert "test" in TestModel.__typed_fields__
-    assert len(TestModel.__chain__.nodes) == 3  # noqa: PLR2004
+    assert TestModel.__chain__.start_separator.value == "sep"
+    field_seps = list(TestModel.__chain__.iter_field_seps())
+    assert len(field_seps) == 1
+    assert field_seps[0].field.name == "test"
+    assert field_seps[0].separator.value == "other"
     assert TestModel.__regex__ == r"sep(?P<test>\w+)other"
 
 
@@ -82,7 +87,7 @@ def test_model_can_reference_field_multiple_times() -> None:
 
     assert len(TestModel.__typed_fields__) == 1
     assert "test" in TestModel.__typed_fields__
-    assert len(TestModel.__chain__.nodes) == 3  # noqa: PLR2004
+    assert len(list(TestModel.__chain__.iter_field_seps())) == 2  # noqa: PLR2004
     assert TestModel.__regex__ == r"(?P<test>\w+)/(?P=test)"
 
 

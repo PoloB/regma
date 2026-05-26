@@ -14,7 +14,6 @@ from regma.error import ValidityError
 from regma.field import StrField
 from regma.validation.fsm import CollisionResult
 from regma.validation.fsm import FsmBuilder
-from regma.validation.fsm import FsmChain
 from regma.validation.fsm import FsmRegexCache
 from regma.validation.fsm import TemplateHasNoCollision
 from regma.validation.fsm import TemplateHasNoEmptyToken
@@ -53,18 +52,9 @@ def test_fsm_builder_cache() -> None:
     assert cached_fsm is fsm
 
 
-def test_compute_collision_with_empty_chain(fsm_builder: FsmBuilder) -> None:
-    """Make sure the compute collision return a valid collision result when empty."""
-    fsm_chain = FsmChain.from_chain(Chain([]), fsm_builder)
-    result = compute_collision(fsm_chain)
-    assert isinstance(result, CollisionResult)
-    assert not result.has_collision()
-
-
 def test_separator_only_chain_is_always_valid(fsm_builder: FsmBuilder) -> None:
     """Make sure a separator only chain is always valid."""
-    fsm_chain = FsmChain.from_chain(Chain([Separator("test")]), fsm_builder)
-    result = compute_collision(fsm_chain)
+    result = compute_collision(Chain(Separator("test"), []), fsm_builder)
     assert isinstance(result, CollisionResult)
     assert not result.has_collision()
 

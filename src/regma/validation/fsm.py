@@ -9,15 +9,14 @@ from typing import TYPE_CHECKING
 
 import greenery
 
-from regma.core import BoundField
-from regma.core import FieldReference
-from regma.core import Separator
 from regma.error import ValidityError
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from regma.core import Chain
+    from regma.core import FieldReference
+    from regma.core import FieldSep
     from regma.model import TemplateModelMeta
 
 
@@ -165,7 +164,9 @@ def _get_shortest_path(fsm: greenery.Fsm) -> list[greenery.Charclass]:
         for state, path in current_level:
             if state in fsm.finals:
                 return path
-            syms_by_next_state: dict[int, list[greenery.Charclass]] = collections.defaultdict(list)
+            syms_by_next_state: dict[int, list[greenery.Charclass]] = (
+                collections.defaultdict(list)
+            )
             identical_state = -1
             for sym, next_state in fsm.map[state].items():
                 if next_state in visited and next_state != identical_state:
@@ -192,21 +193,21 @@ def _generate_example(fsm: greenery.Fsm) -> str:
 
 
 @dataclasses.dataclass(frozen=True)
-class FsmNode:
-    """A finite state machine object corresponding to a template node."""
-
-    node: Separator | FieldReference
-    fsm: greenery.Fsm
-    static: bool
-
-
-@dataclasses.dataclass(frozen=True)
 class FsmFieldNode:
     """A finite state machine object corresponding to a template field."""
 
-    field: FieldReference
+    field_sep: FieldSep
     fsm: greenery.Fsm
-    separator: str
+
+    @property
+    def field_name(self) -> str:
+        """Return the field name."""
+        return self.field_sep.field.name
+
+    @property
+    def separator(self) -> str:
+        """Return the value of the separator."""
+        return self.field_sep.separator.value
 
 
 @dataclasses.dataclass(frozen=True)
@@ -218,7 +219,7 @@ class TokenExample:
 
     def get_display_string(self) -> str:
         """Return the string representation of the example."""
-        return f"{self.node.field.name}={self.example}"
+        return f"{self.node.field_name}={self.example}"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -235,7 +236,7 @@ class CollidingExample:
         right1 = self.option1[1]
         node1 = left1.node
         return (
-            f"{{{node1.field.name}}}{node1.separator}{{{right1.node.field.name}}} "
+            f"{{{node1.field_name}}}{node1.separator}{{{right1.node.field_name}}} "
             f"gives '{self.combined_example}' with both "
             f"({self.option1[0].get_display_string()}, "
             f"{self.option1[1].get_display_string()}) "
@@ -326,52 +327,33 @@ class CollisionResult:
                 yield decomp.generate_colliding_example()
 
 
-def compute_collision(chain: FsmChain) -> CollisionResult:
+def compute_collision(chain: Chain, fsm_builder: FsmBuilder) -> CollisionResult:
     """Compute the collision within the fsm chain."""
-    # Only keep field reference and separators
-    nodes = list(chain.iter_nodes())
+    field_seps = list(chain.iter_field_seps())
 
-    # Remove elements until we fall onto a FieldReference
-    while nodes and not isinstance(nodes[0].node, FieldReference):
-        nodes.pop(0)
-
-    while nodes and not isinstance(nodes[-1].node, FieldReference):
-        nodes.pop(-1)
-
-    if not nodes:
+    if not field_seps:
         return CollisionResult([])
-
-    first_node = nodes[0]
-    previous_is_static = first_node.static
-
-    # TODO(PoloB): we could do the parsing differently to avoid this assertion
-    assert isinstance(first_node.node, FieldReference)  # noqa: S101
-
-    current_separator = ""
-    current_node = FsmFieldNode(first_node.node, first_node.fsm, current_separator)
-    current_fsm = current_node.fsm
 
     # Create frontiers between FieldReference
     # We skip any frontier that has a static fsm node
     frontier_nodes: list[tuple[FsmFieldNode, FsmFieldNode]] = []
 
-    for node in nodes[1:]:
-        if isinstance(node.node, Separator):
-            current_fsm = current_fsm.concatenate(node.fsm)
-            current_separator = node.node.value
+    for k, left_field_sep in enumerate(field_seps[:-1]):
+        right_field_sep = field_seps[k + 1]
+
+        if chain.is_field_reused(left_field_sep.field) or chain.is_field_reused(
+            right_field_sep.field
+        ):
             continue
 
-        if isinstance(node.node, FieldReference):
-            # Store the current fsm
-            left_node = FsmFieldNode(current_node.field, current_fsm, current_separator)
-            right_node = FsmFieldNode(node.node, node.fsm, "")
-            current_node = right_node
-            current_fsm = current_node.fsm
-            if previous_is_static or node.static:
-                previous_is_static = node.static
-                continue
-            previous_is_static = node.static
-            frontier_nodes.append((left_node, right_node))
+        # Compute the fsm of the field only to get better cache hits
+        left_field_fsm = fsm_builder.build_fsm(left_field_sep.field.to_regex())
+        left_sep_fsm = fsm_builder.build_fsm(left_field_sep.separator.to_regex())
+        right_field_fsm = fsm_builder.build_fsm(right_field_sep.field.to_regex())
+        right_sep_fsm = fsm_builder.build_fsm(right_field_sep.separator.to_regex())
+        left_node = FsmFieldNode(left_field_sep, left_field_fsm + left_sep_fsm)
+        right_node = FsmFieldNode(right_field_sep, right_field_fsm + right_sep_fsm)
+        frontier_nodes.append((left_node, right_node))
 
     frontier_decompositions: list[FsmFrontierDecomposition] = []
 
@@ -419,33 +401,6 @@ class FsmBuilder:
         return fsm
 
 
-class FsmChain:
-    """A chain of finite state machines."""
-
-    @classmethod
-    def from_chain(cls, chain: Chain, builder: FsmBuilder) -> FsmChain:
-        """Create a FsmChain from a template chain."""
-        nodes = chain.nodes
-
-        fsm_nodes: list[FsmNode] = []
-
-        for node in nodes:
-            regex = node.to_regex()
-            fsm = builder.build_fsm(regex)
-            fsm_node = FsmNode(node, fsm, chain.is_field_reused(node))
-            fsm_nodes.append(fsm_node)
-
-        return cls(fsm_nodes)
-
-    def __init__(self, fsm_nodes: list[FsmNode]) -> None:
-        """Initialize the chain of fsms."""
-        self._nodes = fsm_nodes
-
-    def iter_nodes(self) -> Iterator[FsmNode]:
-        """Iterate over all nodes in the chain."""
-        yield from self._nodes
-
-
 class TemplateHasNoCollision:
     """Validate a template has no collision."""
 
@@ -455,15 +410,14 @@ class TemplateHasNoCollision:
 
     def validate(self, template: TemplateModelMeta) -> None:
         """Raise ValidityError if template has collision."""
-        chain = FsmChain.from_chain(template.__chain__, self._fsm_builder)
-        collision = compute_collision(chain)
+        collision = compute_collision(template.__chain__, self._fsm_builder)
         if not collision.has_collision():
             return
 
         colliding_frontiers = collision.get_colliding_frontiers()
 
         token_pairs = ", ".join(
-            [f"({f.left.field.name}, {f.right.field.name})" for f in colliding_frontiers]
+            [f"({f.left.field_name}, {f.right.field_name})" for f in colliding_frontiers]
         )
 
         examples = ", ".join(
@@ -487,21 +441,17 @@ class TemplateHasNoEmptyToken:
 
     def validate(self, template: TemplateModelMeta) -> None:
         """Validate the template model."""
-        chain = FsmChain.from_chain(template.__chain__, self._fsm_builder)
+        empty_fields: list[FieldReference] = []
+        for field_sep in template.__chain__.iter_field_seps():
+            field_fsm = self._fsm_builder.build_fsm(field_sep.field.to_regex())
+            if field_fsm.initial in field_fsm.finals:
+                empty_fields.append(field_sep.field)
 
-        empty_nodes: list[FsmNode] = [
-            fsm_node
-            for fsm_node in chain.iter_nodes()
-            if fsm_node.fsm.initial in fsm_node.fsm.finals
-        ]
-
-        if not empty_nodes:
+        if not empty_fields:
             return
 
-        token_names = ", ".join(
-            [node.node.name for node in empty_nodes if isinstance(node.node, BoundField)]
-        )
+        fields_names = ", ".join([field.name for field in empty_fields])
         error_message = (
-            f"Template {template} has fields which can be empty: {token_names}"
+            f"Template {template} has fields which can be empty: {fields_names}"
         )
         raise ValidityError(error_message)

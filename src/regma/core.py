@@ -18,6 +18,8 @@ from regma.error import ParseError
 from regma.error import ValidationError
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from regma.model import TemplateModel
 
 
@@ -37,15 +39,35 @@ class FormatNode(TemplateNode):
         """Return the formatted string of this template node."""
 
 
+class FieldSep:
+    """A field followed by a separator."""
+
+    def __init__(self, field: FieldReference, separator: Separator) -> None:
+        """Initialize the field separator."""
+        self._field = field
+        self._sep = separator
+
+    @property
+    def field(self) -> FieldReference:
+        """Return the field."""
+        return self._field
+
+    @property
+    def separator(self) -> Separator:
+        """Return the separator."""
+        return self._sep
+
+
 class Chain(FormatNode):
     """Ordered sequence of template nodes."""
 
-    def __init__(self, nodes: list[Separator | FieldReference]) -> None:
+    def __init__(self, start_separator: Separator, field_seps: list[FieldSep]) -> None:
         """Initialize the chain."""
-        self._nodes = nodes
-        self._fields = [n for n in nodes if isinstance(n, FieldReference)]
+        self._start_sep = start_separator
+        self._field_seps = field_seps
+        self._fields = [n.field for n in field_seps]
 
-        self._field_reuse: dict[Separator | FieldReference, bool] = {}
+        self._field_reuse: dict[FieldReference, bool] = {}
         seen_fields: set[str] = set()
 
         for field in self._fields:
@@ -54,32 +76,37 @@ class Chain(FormatNode):
             seen_fields.add(field.name)
 
     @property
-    def nodes(self) -> list[Separator | FieldReference]:
+    def start_separator(self) -> Separator:
+        """Return the first separator of the chain."""
+        return self._start_sep
+
+    def iter_field_seps(self) -> Iterator[FieldSep]:
         """Return the ordered sequence of template nodes."""
-        return self._nodes
+        yield from self._field_seps
 
     @override
     def to_regex(self) -> str:
         regexes = []
-        for node in self._nodes:
-            if isinstance(node, Separator):
-                regexes.append(node.to_regex())
-                continue
-
-            field_name = node.name.replace(".", "__")
-            if self._field_reuse.get(node, False):
+        for field_sep in self._field_seps:
+            field = field_sep.field
+            field_name = field.name.replace(".", "__")
+            if self._field_reuse.get(field, False):
                 regex = rf"(?P={field_name})"
             else:
-                regex = rf"(?P<{field_name}>{node.to_regex()})"
+                regex = rf"(?P<{field_name}>{field.to_regex()})"
             regexes.append(regex)
-        return "".join(regexes)
+            regexes.append(field_sep.separator.to_regex())
+        return self._start_sep.to_regex() + "".join(regexes)
 
     @override
     def format(self, model: TemplateModel) -> str:
         """Return the formatted string of this chain."""
-        return "".join(n.format(model) for n in self._nodes)
+        return self._start_sep.format(model) + "".join(
+            f"{n.field.format(model)}{n.separator.format(model)}"
+            for n in self._field_seps
+        )
 
-    def is_field_reused(self, field: Separator | FieldReference) -> bool:
+    def is_field_reused(self, field: FieldReference) -> bool:
         """Return if given field is already used earlier in the chain."""
         return self._field_reuse.get(field, False)
 
