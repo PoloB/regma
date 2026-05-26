@@ -112,3 +112,20 @@ def test_failing_on_colliding_model() -> None:
             __template__ = "start_{foo}_{bar}_end"
             foo: str = string(r".+")
             bar: str = string(r"[^a]+")
+
+
+def test_empty_field_succeed_with_no_validation() -> None:
+    """Make sure validation passes with no validation."""
+    class _TestModel(TemplateModel, fsm_validation=False):
+        """Simple test model."""
+
+        __template__ = "{test}"
+        test: str = string(".*")
+
+
+def test_collision_succeed_with_no_validation() -> None:
+    """Make sure validation passes with no validation."""
+    class _TestModel(TemplateModel, fsm_validation=False):
+        __template__ = "start_{foo}_{bar}_end"
+        foo: str = string(r".+")
+        bar: str = string(r"[^a]+")

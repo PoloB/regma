@@ -151,7 +151,7 @@ class TemplateModelMeta(type):
         **kwargs: Any,  # noqa: ANN401
     ) -> TemplateModelMeta:
         """Build the template model internals (fields -> bound fields, chain, regex)."""
-        cls: TemplateModelMeta = super().__new__(mcs, name, bases, namespace, **kwargs)
+        cls: TemplateModelMeta = super().__new__(mcs, name, bases, namespace)
 
         # Skip the bare TemplateModel base itself
         if name == "TemplateModel":
@@ -213,16 +213,19 @@ class TemplateModelMeta(type):
         __chain: Chain = _parse_template(cls)
         cls.__chain__ = __chain
         FieldReferenceValidator().validate(cls)
-        __fsm_builder = FsmBuilder(FsmRegexCache())
-        TemplateHasNoEmptyToken(__fsm_builder).validate(cls)
-        TemplateHasNoCollision(__fsm_builder).validate(cls)
+
+        if kwargs.get("fsm_validation", True):
+            __fsm_builder = FsmBuilder(FsmRegexCache())
+            TemplateHasNoEmptyToken(__fsm_builder).validate(cls)
+            TemplateHasNoCollision(__fsm_builder).validate(cls)
+
         cls.__regex__ = cls.__chain__.to_regex()
 
         return cls
 
 
 @dataclass_transform(field_specifiers=(string, integer, choice, custom_field, reference))
-class TemplateModel(metaclass=TemplateModelMeta):
+class TemplateModel(metaclass=TemplateModelMeta, fsm_validation=True):
     r"""Base class for all declarative template models.
 
     Subclass to declare a typed, bidirectional string template:
