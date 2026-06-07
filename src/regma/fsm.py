@@ -4,20 +4,24 @@ from __future__ import annotations
 
 import collections
 import dataclasses
+import enum
 import sys
 from typing import TYPE_CHECKING
+from typing import TypeVar
 
 import greenery
+from typing_extensions import Self  # noqa: UP035
 
 from regma.error import ValidityError
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from regma import Model
     from regma.core import Chain
     from regma.core import FieldReference
     from regma.core import FieldSep
-    from regma.model import TemplateModelMeta
+    from regma.template import BoundTemplate
 
 
 def _left_reminder(fsm: greenery.Fsm) -> greenery.Fsm:
@@ -401,57 +405,74 @@ class FsmBuilder:
         return fsm
 
 
-class TemplateHasNoCollision:
-    """Validate a template has no collision."""
-
-    def __init__(self, fsm_builder: FsmBuilder) -> None:
-        """Initialize the validator."""
-        self._fsm_builder = fsm_builder
-
-    def validate(self, template: TemplateModelMeta) -> None:
-        """Raise ValidityError if template has collision."""
-        collision = compute_collision(template.__chain__, self._fsm_builder)
-        if not collision.has_collision():
-            return
-
-        colliding_frontiers = collision.get_colliding_frontiers()
-
-        token_pairs = ", ".join(
-            [f"({f.left.field_name}, {f.right.field_name})" for f in colliding_frontiers]
-        )
-
-        examples = ", ".join(
-            [example.get_display_string() for example in collision.generate_examples()]
-        )
-
-        error_message = (
-            f"Template {template} has possible collision on following token pairs: "
-            f"{token_pairs}. "
-            f"Example strings: {examples}"
-        )
-        raise ValidityError(error_message)
+T_mod = TypeVar("T_mod", bound="Model")
 
 
-class TemplateHasNoEmptyToken:
-    """Validate a template has no empty token."""
+def validate_template_has_no_collision(
+    fsm_builder: FsmBuilder, template: BoundTemplate[T_mod]
+) -> None:
+    """Raise ValidityError if template has collision."""
+    collision = compute_collision(template.chain, fsm_builder)
+    if not collision.has_collision():
+        return
 
-    def __init__(self, fsm_builder: FsmBuilder) -> None:
-        """Initialize the validator."""
-        self._fsm_builder = fsm_builder
+    colliding_frontiers = collision.get_colliding_frontiers()
 
-    def validate(self, template: TemplateModelMeta) -> None:
-        """Validate the template model."""
-        empty_fields: list[FieldReference] = []
-        for field_sep in template.__chain__.iter_field_seps():
-            field_fsm = self._fsm_builder.build_fsm(field_sep.field.to_regex())
-            if field_fsm.initial in field_fsm.finals:
-                empty_fields.append(field_sep.field)
+    token_pairs = ", ".join(
+        [f"({f.left.field_name}, {f.right.field_name})" for f in colliding_frontiers]
+    )
 
-        if not empty_fields:
-            return
+    examples = ", ".join(
+        [example.get_display_string() for example in collision.generate_examples()]
+    )
 
-        fields_names = ", ".join([field.name for field in empty_fields])
-        error_message = (
-            f"Template {template} has fields which can be empty: {fields_names}"
-        )
-        raise ValidityError(error_message)
+    error_message = (
+        f"Template {template} has possible collision on following token pairs: "
+        f"{token_pairs}. "
+        f"Example strings: {examples}"
+    )
+    raise ValidityError(error_message)
+
+
+def validate_template_has_no_empty_token(
+    fsm_builder: FsmBuilder, template: BoundTemplate[T_mod]
+) -> None:
+    """Validate the template model."""
+    empty_fields: list[FieldReference] = []
+    for field_sep in template.chain.iter_field_seps():
+        field_fsm = fsm_builder.build_fsm(field_sep.field.to_regex())
+        if field_fsm.initial in field_fsm.finals:
+            empty_fields.append(field_sep.field)
+
+    if not empty_fields:
+        return
+
+    fields_names = ", ".join([field.name for field in empty_fields])
+    error_message = f"Template {template} has fields which can be empty: {fields_names}"
+    raise ValidityError(error_message)
+
+
+class FsmValidationFlag(enum.Flag):
+    """Type of Finite state machine available validation."""
+
+    EMPTY_TOKEN = enum.auto()
+    COLLISION = enum.auto()
+
+    @classmethod
+    def all(cls) -> Self:
+        """Return flags to request all validations."""
+        result = cls(0)
+        for member in cls:
+            result |= member
+        return result
+
+
+def validate(
+    fsm_builder: FsmBuilder, template: BoundTemplate[T_mod], flag: FsmValidationFlag
+) -> None:
+    """Validate the given template with respect to the given flags."""
+    if flag & FsmValidationFlag.EMPTY_TOKEN:
+        validate_template_has_no_empty_token(fsm_builder, template)
+
+    if flag & FsmValidationFlag.COLLISION:
+        validate_template_has_no_collision(fsm_builder, template)

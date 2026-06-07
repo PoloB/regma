@@ -5,36 +5,62 @@ from __future__ import annotations
 import functools
 from typing import TYPE_CHECKING
 
-from regma import TemplateModel
+from regma import Model
 from regma import integer
 from regma import reference
 from regma import string
+from regma.template import model_template
 
 if TYPE_CHECKING:
     from pytest_benchmark.fixture import BenchmarkFixture
 
 
-def _create_model() -> type[TemplateModel]:
+def _create_model() -> type[Model]:
 
-    class BenchmarkModel1(TemplateModel):
-        __template__ = "{foo}_{bar}"
+    class _BenchmarkModel1(Model):
         foo: str = string(r"[a-zA-Z0-9]+")
         bar: int = integer(0, 9999, 4)
 
-    return BenchmarkModel1
+        template = model_template("{foo}_{bar}")
+
+    return _BenchmarkModel1
 
 
-def _create_reference_model() -> type[TemplateModel]:
+def _create_reference_model() -> type[Model]:
 
     model1 = _create_model()
 
-    class BenchmarkModel2(TemplateModel):
-        __template__ = "{foo_bar}_{foo_bar.bar}_{foo_bar.foo}_{foo}_{bar}"
-        foo_bar: TemplateModel = reference(model1)
+    class _BenchmarkModel2(Model):
+        foo_bar: Model = reference(model1)
         foo: str = string(r"[a-zA-Z0-9]+")
         bar: int = integer(0, 9999, 4)
 
-    return BenchmarkModel2
+        template = model_template(
+            "{foo_bar.template}_{foo_bar.bar}_{foo_bar.foo}_{foo}_{bar}"
+        )
+
+    return _BenchmarkModel2
+
+
+class BenchmarkModel1(Model):
+    """Test model for benchmark."""
+
+    foo: str = string(r"[a-zA-Z0-9]+")
+    bar: int = integer(0, 9999, 4)
+
+    template = model_template("{foo}_{bar}")
+
+
+class BenchmarkModel2(Model):
+    """Test model for benchmark."""
+
+    foo_bar: BenchmarkModel1
+    foo: str = string(r"[a-zA-Z0-9]+")
+    bar: int = integer(0, 9999, 4)
+
+    template = model_template(
+        "{foo_bar.template}_{foo_bar.bar}_{foo_bar.foo}_{foo}_{bar}"
+    )
 
 
 def test_benchmark_simple_model_definition(benchmark: BenchmarkFixture) -> None:
@@ -54,11 +80,11 @@ def test_benchmark_simple_model_instantiation(benchmark: BenchmarkFixture) -> No
 
 def test_benchmark_parse(benchmark: BenchmarkFixture) -> None:
     """Benchmark the parsing of a string through a model."""
-    benchmark(_create_reference_model().parse, "test_0042_0042_test_other_0001")
+    benchmark(BenchmarkModel2.template.parse, "test_0042_0042_test_other_0001")
 
 
 def test_benchmark_format(benchmark: BenchmarkFixture) -> None:
     """Benchmark the format of a model."""
-    model = _create_model()("test", 42)
-    model_reference = _create_reference_model()(model, "other", 1)
-    benchmark(model_reference.format)
+    model = BenchmarkModel1("test", 42)
+    model_reference = BenchmarkModel2(model, "other", 1)
+    benchmark(lambda: model_reference.template)

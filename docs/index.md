@@ -22,21 +22,23 @@ regma turns each token into a **first-class object** and each template
 result into a **typed model instance**:
 
 ```python
-from regma import TemplateModel, Field, Slot
+from regma import Model, Field, Slot
 from regma.fields import StrField, ChoiceField, IntField
 
 ASSET_TYPE = ChoiceField("type", choices=["chr", "prp", "env", "veh"])
 ASSET_CODE = StrField("code", pattern=r"[a-z][a-z0-9]+")
 
-class AssetResult(TemplateModel):
+
+class AssetResult(Model):
     type: str = Field(ASSET_TYPE)
     code: str = Field(ASSET_CODE)
     template = ASSET_TYPE >> "_" >> ASSET_CODE
 
+
 result = AssetResult.parse("chr_toto")
-result.type   # "chr"   ← attribute access, not dict lookup
-result.code   # "toto"
-str(result)   # "chr_toto"  ← bidirectional
+result.type  # "chr"   ← attribute access, not dict lookup
+result.code  # "toto"
+str(result)  # "chr_toto"  ← bidirectional
 ```
 
 ---
@@ -74,42 +76,45 @@ Requires Python 3.10+, no dependencies.
 
 ```python
 import regma
-from regma import TemplateModel, Field, Slot, Delimiter
+from regma import Model, Field, Slot, Delimiter
 from regma.fields import StrField, ChoiceField, IntField
 
 # ── Fields ────────────────────────────────────────────────────────────────────
 ASSET_TYPE = ChoiceField("type", choices=["chr", "prp", "env", "veh"])
 ASSET_CODE = StrField("code", pattern=r"[a-z][a-z0-9]+")
-GROOM      = StrField("groom", pattern=r"[a-z]+")
+GROOM = StrField("groom", pattern=r"[a-z]+")
+
 
 # ── Sub-model ─────────────────────────────────────────────────────────────────
-class AssetResult(TemplateModel):
+class AssetResult(Model):
     type: str = Field(ASSET_TYPE)
     code: str = Field(ASSET_CODE)
     template = ASSET_TYPE >> "_" >> ASSET_CODE
 
+
 # ── Composite model ───────────────────────────────────────────────────────────
-class GroomPathResult(TemplateModel):
-    asset_source = Slot(AssetResult)   # reusable — same type, distinct instances
+class GroomPathResult(Model):
+    asset_source = Slot(AssetResult)  # reusable — same type, distinct instances
     asset_target = Slot(AssetResult)
-    groom: str   = Field(GROOM)
+    groom: str = Field(GROOM)
 
     template = (
         "/root/assets/{asset_source.type}/{asset_source}"
         "/modeling/GB_{asset_source}_{groom}_{asset_target}"
     )
 
+
 # ── Parse ─────────────────────────────────────────────────────────────────────
 path = "/root/assets/chr/chr_toto/modeling/GB_chr_toto_hair_chr_tata"
 result = GroomPathResult.parse(path)
 
-result.asset_source          # AssetResult(type='chr', code='toto')
-result.asset_source.type     # 'chr'
-result.groom                 # 'hair'
-result.asset_target.code     # 'tata'
+result.asset_source  # AssetResult(type='chr', code='toto')
+result.asset_source.type  # 'chr'
+result.groom  # 'hair'
+result.asset_target.code  # 'tata'
 
 # ── Format ────────────────────────────────────────────────────────────────────
-str(result)   # "/root/assets/chr/chr_toto/modeling/GB_chr_toto_hair_chr_tata"
+str(result)  # "/root/assets/chr/chr_toto/modeling/GB_chr_toto_hair_chr_tata"
 ```
 
 ---

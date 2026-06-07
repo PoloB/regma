@@ -8,10 +8,11 @@ This guide walks through regma's core concepts in 5 minutes.
 Subclass `TemplateModel`, declare fields, and write the `template`:
 
 ```python
-from regma import TemplateModel
+from regma import Model
 from regma import field
 
-class Asset(TemplateModel):
+
+class Asset(Model):
     type: str = field.choice({'chr', 'prp'})
     code: str = field.string(r"\w+")
 
@@ -36,11 +37,11 @@ Parse and format are always **symmetric**: `str(Model.parse(s)) == s`.
 A `TemplateModel` can be embedded inside another via `field.model`:
 
 ```python
-from regma import TemplateModel
+from regma import Model
 from regma import field
 
 
-class GroomPath(TemplateModel):
+class GroomPath(Model):
     asset_source: Asset
     asset_target: Asset
     groom: str = field.string(r"\w+")

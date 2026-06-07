@@ -5,90 +5,64 @@ import re
 import pytest
 
 from regma import DefinitionError
+from regma import Model
 from regma import ParseError
-from regma import TemplateModel
-from regma.error import ValidationError
 from regma.field import integer
-from regma.field import reference
 from regma.field import string
+from regma.template import model_template
 from tests.conftest import ComplexModel
 from tests.conftest import FooBarModel
-
-
-def test_model_fails_without_template() -> None:
-    """Definition of template model fails if no __template__ is not defined."""
-    with pytest.raises(DefinitionError):
-
-        class TestModel(TemplateModel):
-            pass
-
-
-def test_model_fails_with_wrong_delimiter_type() -> None:
-    """Definition of template model fails if wrong delimiter type is provided."""
-    with pytest.raises(DefinitionError):
-
-        class TestModel(TemplateModel):
-            __template__ = "test"
-            __delimiter__ = "wrong"  # type: ignore[assignment]
-
-
-def test_validate_simple_model() -> None:
-    """Models are valid if they provide at least a template."""
-
-    class TestModel(TemplateModel):
-        __template__ = "test"
 
 
 def test_validate_simple_model_with_field() -> None:
     """Models are valid if they provide a template with a field."""
 
-    class TestModel(TemplateModel):
-        __template__ = "{field}"
+    class TestModel(Model):
         field: str = string(".+")
 
 
 def test_fields_are_extracted_correctly() -> None:
     """References to fields are extracted correctly."""
 
-    class TestModel(TemplateModel):
-        __template__ = "{test}"
+    class TestModel(Model):
         test: str = string(r"\w+")
+        template = model_template("{test}")
 
     assert len(TestModel.__typed_fields__) == 1
     assert "test" in TestModel.__typed_fields__
-    assert TestModel.__chain__.start_separator.value == ""
-    assert len(list(TestModel.__chain__.iter_field_seps())) == 1
-    assert TestModel.__regex__ == r"(?P<test>\w+)"
+    assert TestModel.template.chain.start_separator.value == ""
+    assert len(list(TestModel.template.chain.iter_field_seps())) == 1
+    assert TestModel.template.regex == r"(?P<test>\w+)"
 
 
 def test_sep_fields_are_extracted_correctly() -> None:
     """References to fields are extracted correctly including separators."""
 
-    class TestModel(TemplateModel):
-        __template__ = "sep{test}other"
+    class TestModel(Model):
         test: str = string(r"\w+")
+        template = model_template("sep{test}other")
 
     assert len(TestModel.__typed_fields__) == 1
     assert "test" in TestModel.__typed_fields__
-    assert TestModel.__chain__.start_separator.value == "sep"
-    field_seps = list(TestModel.__chain__.iter_field_seps())
+    assert TestModel.template.chain.start_separator.value == "sep"
+    field_seps = list(TestModel.template.chain.iter_field_seps())
     assert len(field_seps) == 1
     assert field_seps[0].field.name == "test"
     assert field_seps[0].separator.value == "other"
-    assert TestModel.__regex__ == r"sep(?P<test>\w+)other"
+    assert TestModel.template.regex == r"sep(?P<test>\w+)other"
 
 
 def test_model_can_reference_field_multiple_times() -> None:
     """A model can reference multiple times in its template."""
 
-    class TestModel(TemplateModel):
-        __template__ = "{test}/{test}"
+    class TestModel(Model):
         test: str = string(r"\w+")
+        template = model_template("{test}/{test}")
 
     assert len(TestModel.__typed_fields__) == 1
     assert "test" in TestModel.__typed_fields__
-    assert len(list(TestModel.__chain__.iter_field_seps())) == 2  # noqa: PLR2004
-    assert TestModel.__regex__ == r"(?P<test>\w+)/(?P=test)"
+    assert len(list(TestModel.template.chain.iter_field_seps())) == 2  # noqa: PLR2004
+    assert TestModel.template.regex == r"(?P<test>\w+)/(?P=test)"
 
 
 def test_reuse_leaves_ambiguity() -> None:
@@ -101,36 +75,40 @@ def test_reuse_leaves_ambiguity() -> None:
     cannot create a collision.
     """
 
-    class _TestModel(TemplateModel):
-        __template__ = "{bar}_{foo}_{bar}_{test}"
+    class _TestModel(Model):
         foo: str = string(r"[a-zA-Z0-9]+")
         bar: str = string(r"\w+")
         test: str = string(r"\w+")
+        template = model_template("{bar}_{foo}_{bar}_{test}")
 
 
 def test_model_can_reference_other_models_through_model_field() -> None:
     """A model can reference other models through the model field."""
 
-    class FirstModel(TemplateModel):
-        __template__ = "{foo}_{bar}"
+    class FirstModel(Model):
         foo: str = string(r"[a-zA-Z0-9]+")
         bar: str = string(r"\w+")
+        template = model_template("{foo}_{bar}")
 
-    class SecondModel(TemplateModel):
-        __template__ = "{foo}/{bar}/{first}/{first.foo}_{foo}_{bar}_{first.bar}_{first}"
+    class SecondModel(Model):
         foo: str = string(r"[a-zA-Z0-9]+")
         bar: str = string(r"\w+")
-        first: FirstModel = reference(FirstModel)
+        first: FirstModel
+        template = model_template(
+            "{foo}/{bar}/{first.template}/{first.foo}_{foo}_{bar}_{first.bar}_{first.template}"
+        )
 
     assert len(SecondModel.__typed_fields__) == 2  # noqa: PLR2004
-    assert len(SecondModel.__model_fields__) == 1
+    assert len(SecondModel.__model_refs__) == 1
     assert (
-        SecondModel.__regex__ == r"(?P<foo>[a-zA-Z0-9]+)/(?P<bar>\w+)/"
+        SecondModel.template.regex == r"(?P<foo>[a-zA-Z0-9]+)/(?P<bar>\w+)/"
         r"(?P<first__foo>[a-zA-Z0-9]+)_(?P<first__bar>\w+)/"
         r"(?P=first__foo)_(?P=foo)_(?P=bar)_(?P=first__bar)_(?P=first__foo)_(?P=first__bar)"
     )
     assert (
-        re.match(SecondModel.__regex__, "foo/bar/ffoo_fbar/ffoo_foo_bar_fbar_ffoo_fbar")
+        re.match(
+            SecondModel.template.regex, "foo/bar/ffoo_fbar/ffoo_foo_bar_fbar_ffoo_fbar"
+        )
         is not None
     )
 
@@ -139,18 +117,18 @@ def test_definition_fails_referencing_unknown_field() -> None:
     """Definition of model shall fail when referencing an unknown field."""
     with pytest.raises(DefinitionError):
 
-        class TestModel(TemplateModel):
-            __template__ = "{test}"
+        class TestModel(Model):
             other: str = string(r"\w+")
+            template = model_template("{test}")
 
 
 def test_definition_fails_if_field_ends_with_underscore() -> None:
     """Definition of model shall fail if the field ends with underscore."""
-    with pytest.raises(ValidationError):
+    with pytest.raises(DefinitionError):
 
-        class TestModel(TemplateModel):
-            __template__ = "{test_}"
+        class TestModel(Model):
             test_: str = string(r"\w+")
+            template = model_template("{test_}")
 
 
 def test_definition_fails_if_field_contain_double_underscore() -> None:
@@ -159,55 +137,74 @@ def test_definition_fails_if_field_contain_double_underscore() -> None:
     We need this to make sure there is no collision between the name of the field and
     the __ used as separator in capturing groups.
     """
-    with pytest.raises(ValidationError):
+    with pytest.raises(DefinitionError):
 
-        class TestModel(TemplateModel):
-            __template__ = "{foo__bar}"
+        class TestModel(Model):
             foo__bar: str = string(r"\w+")
+            template = model_template("{foo__bar}")
 
 
 def test_definition_fails_referencing_incorrectly_typed_field() -> None:
     """Definition of model shall fail when referencing an field with the wrong type."""
     with pytest.raises(DefinitionError):
 
-        class TestModel(TemplateModel):
-            __template__ = "{test}"
+        class TestModel(Model):
             test: str = "test"
+            template = model_template("{test}")
 
 
 def test_definition_fails_with_missing_attribute() -> None:
     """Definition of model shall fail when referencing a missing attribute."""
     with pytest.raises(DefinitionError):
 
-        class TestModel(TemplateModel):
-            __template__ = "{.}"
+        class TestModel(Model):
+            template = model_template("{.}")
 
 
 def test_definition_fails_with_missing_model_field() -> None:
     """Definition oif model fails if all the fields are not used in the template."""
-    with pytest.raises(ValidationError):
+    with pytest.raises(DefinitionError):
 
-        class TestModel(TemplateModel):
-            __template__ = "{foo}"
+        class TestModel(Model):
             foo: str = string(r"[a-zA-Z0-9]+")
             bar: str = string(r"\w+")
+            template = model_template("{foo}")
 
 
 def test_definition_fails_with_missing_sub_model_field() -> None:
-    """Definition oif model fails if all the fields are not used in the template."""
+    """Definition of model fails if all the fields are not used in the template."""
 
-    class FirstModel(TemplateModel):
-        __template__ = "{foo}_{bar}"
+    class FirstModel(Model):
         foo: str = string(r"[a-zA-Z0-9]+")
         bar: str = string(r"\w+")
+        template = model_template("{foo}_{bar}")
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(DefinitionError):
 
-        class SecondModel(TemplateModel):
-            __template__ = "{foo}/{bar}/{first.foo}"  # first.bar is missing
+        class SecondModel(Model):
             foo: str = string(r"[a-zA-Z0-9]+")
             bar: str = string(r"\w+")
-            first: FirstModel = reference(FirstModel)
+            first: FirstModel
+            template = model_template("{foo}/{bar}/{first.foo}")  # first.bar is missing
+
+
+def test_definition_fails_with_template_misuse() -> None:
+    """Definition of model fails if a template is not properly referenced."""
+
+    class FirstModel(Model):
+        foo: str = string(r"[a-zA-Z0-9]+")
+        bar: str = string(r"\w+")
+        template = model_template("{foo}_{bar}")
+
+    with pytest.raises(DefinitionError):
+
+        class SecondModel(Model):
+            foo: str = string(r"[a-zA-Z0-9]+")
+            bar: str = string(r"\w+")
+            first: FirstModel
+            template = model_template(
+                "{foo}/{bar}/{first.template.nope}"
+            )  # first.template.nope is invalid
 
 
 def test_model_is_instantiated_correctly() -> None:
@@ -234,10 +231,10 @@ def test_model_eq_different() -> None:
 def test_model_eq_different_type() -> None:
     """Models are different if the type is different, event if fields are identical."""
 
-    class OtherFooBarModel(TemplateModel):
-        __template__ = "{foo}_{bar}"
+    class OtherFooBarModel(Model):
         foo: str = string(r"[a-zA-Z0-9]+")
         bar: int = integer()
+        template = model_template("{foo}_{bar}")
 
     mode1 = FooBarModel("test", 1)
     mode2 = OtherFooBarModel("test", 1)
@@ -312,19 +309,14 @@ def test_model_from_flat_dict_fail_with_missing_key() -> None:
 
 def test_model_parse() -> None:
     """Models shall parse successfully."""
-    inst = ComplexModel.parse("/root/foo_2_foo_1")
+    inst = ComplexModel.template.parse("/root/foo_2_foo_1")
     assert inst == ComplexModel(FooBarModel("foo", 2), "foo", 1)
 
 
 def test_model_parse_fail_raises_parse_error() -> None:
     """Models shall raise ParseError if parse fails."""
     with pytest.raises(ParseError):
-        ComplexModel.parse("/nope/foo_2foo_1")
-
-
-def test_model_to_str_returns_format() -> None:
-    """Models shall return a formatted string when using str."""
-    assert str(ComplexModel(FooBarModel("foo", 2), "foo", 1)) == "/root/foo_2_foo_1"
+        ComplexModel.template.parse("/nope/foo_2foo_1")
 
 
 def test_model_repr() -> None:

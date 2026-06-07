@@ -20,7 +20,7 @@ from regma.error import ValidationError
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from regma.model import TemplateModel
+    from regma.model import Model
 
 
 class TemplateNode(abc.ABC):
@@ -35,7 +35,7 @@ class FormatNode(TemplateNode):
     """A node that can contribute to formatting a template model."""
 
     @abc.abstractmethod
-    def format(self, model: TemplateModel) -> str:
+    def format(self, model: Model) -> str:
         """Return the formatted string of this template node."""
 
 
@@ -99,7 +99,7 @@ class Chain(FormatNode):
         return self._start_sep.to_regex() + "".join(regexes)
 
     @override
-    def format(self, model: TemplateModel) -> str:
+    def format(self, model: Model) -> str:
         """Return the formatted string of this chain."""
         return self._start_sep.format(model) + "".join(
             f"{n.field.format(model)}{n.separator.format(model)}"
@@ -123,7 +123,7 @@ class Separator(FormatNode):
         return re.escape(self.value)
 
     @override
-    def format(self, model: TemplateModel) -> str:
+    def format(self, model: Model) -> str:
         return self.value
 
 
@@ -274,7 +274,7 @@ class BoundField(FormatNode, Generic[T_field]):
         return self._field.to_regex()
 
     @override
-    def format(self, model_inst: TemplateModel) -> str:
+    def format(self, model_inst: Model) -> str:
         return self._field.format_value(getattr(model_inst, self._name))
 
 
@@ -304,7 +304,7 @@ class FieldReference(FormatNode):
         return self.target.to_regex()
 
     @override
-    def format(self, model: TemplateModel) -> str:
+    def format(self, model: Model) -> str:
         value = model
         for attr in self.__name.split("."):
             value = getattr(value, attr)
