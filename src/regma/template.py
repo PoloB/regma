@@ -266,6 +266,4 @@ def model_template(
     fsm_validation_flags: FsmValidationFlag | None = None,
 ) -> Template[Model]:
     """Creates a template for the given pattern."""
-    if fsm_validation_flags is None:
-        fsm_validation_flags = FsmValidationFlag.all()
     return Template(pattern, delimiter, fsm_validation_flags)
