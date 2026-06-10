@@ -25,21 +25,20 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
-          enable-caching: true
+          python-version: ${{ matrix.python-version }}
+          enable-cache: 'auto'
           cache-suffix: ${{ matrix.python-version }}-${{ matrix.os }}
 
       - name: Install dependencies
         run: uv sync --frozen --group test
-        env:
-          UV_PYTHON: ${{ matrix.python-version }}
 
       - name: "Run pytest for python${{ matrix.python }}"
         run: |
           uv run pytest tests/ --cov=./ --cov-report=xml
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
@@ -54,14 +53,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
-          enable-caching: true
+          python-version: 3.13
+          enable-cache: 'auto'
 
       - name: Install dependencies
         run: uv sync --frozen --group lint
-        env:
-          UV_PYTHON: "3.13"
 
       - name: Ruff — lint
         run: uv run ruff check .
@@ -81,14 +79,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
-          enable-caching: true
+          python-version: 3.13
+          enable-cache: 'auto'
 
       - name: Install dependencies
         run: uv sync --frozen --group test --group test
-        env:
-          UV_PYTHON: "3.13"
 
       - name: Run benchmarks
         run: uv run pytest tests/ --benchmark-only --benchmark-json benchmark_result.json
@@ -99,7 +96,7 @@ jobs:
           tool: 'pytest'
           output-file-path: benchmark_result.json
           # Where the previous data file is stored
-          external-data-json-path: ./cache/bbenchmark-data-benchmark_result.json
+          external-data-json-path: ./cache/benchmark-data-benchmark_result.json
           # Workflow will fail when an alert happens
           fail-on-alert: true
           # GitHub API token to make a commit comment

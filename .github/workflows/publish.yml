@@ -23,7 +23,7 @@ jobs:
         with:
           fetch-depth: 0   # full history required for hatch-vcs to compute version
 
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
 
       - name: Build sdist and wheel
         run: uv build
@@ -77,6 +77,6 @@ jobs:
           path: dist/
 
       - name: Attach sdist and wheel to GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*
