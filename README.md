@@ -29,11 +29,11 @@ regma lets you define the structure of your strings from typed fields and will h
 ## Concrete example
 
 ```python
-from regma import TemplateModel
+from regma import Model
 from regma import string, choice, integer
 
 
-class Asset(TemplateModel):
+class Asset(Model):
     type: str = choice(["chr", "prp", "set"])
     code: str = string(r"[a-z][a-z0-9]+")
     template = "{type}_{code}"
@@ -50,7 +50,7 @@ parsed_asset = Asset.parse("chr_foo")
 
 
 # Build a more complex example to build a path
-class GroomRetargetInfoPath(TemplateModel):
+class GroomRetargetInfoPath(Model):
     source_asset: Asset
     target_asset: Asset
     groom_name: str = string(r"[a-z][a-z0-9]+")

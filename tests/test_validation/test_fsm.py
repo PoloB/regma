@@ -5,32 +5,22 @@ from __future__ import annotations
 import greenery
 import pytest
 
-from regma import TemplateModel
+from regma import Model
 from regma import string
 from regma.core import Chain
 from regma.core import FieldReference
 from regma.core import Separator
 from regma.error import ValidityError
 from regma.field import StrField
-from regma.validation.fsm import CollisionResult
-from regma.validation.fsm import FsmBuilder
-from regma.validation.fsm import FsmRegexCache
-from regma.validation.fsm import TemplateHasNoCollision
-from regma.validation.fsm import TemplateHasNoEmptyToken
-from regma.validation.fsm import compute_collision
-
-
-@pytest.fixture
-def simple_model() -> type[TemplateModel]:
-    """Return a simple template model."""
-
-    class SimpleTestModel(TemplateModel):
-        """Simple test model."""
-
-        __template__ = "{test}"
-        test: str = string(".+")
-
-    return SimpleTestModel
+from regma.fsm import CollisionResult
+from regma.fsm import FsmBuilder
+from regma.fsm import FsmRegexCache
+from regma.fsm import FsmValidationFlag
+from regma.fsm import compute_collision
+from regma.fsm import validate_template_has_no_collision
+from regma.fsm import validate_template_has_no_empty_token
+from regma.template import model_template
+from tests.conftest import SimpleTestModel
 
 
 @pytest.fixture
@@ -59,75 +49,73 @@ def test_separator_only_chain_is_always_valid(fsm_builder: FsmBuilder) -> None:
     assert not result.has_collision()
 
 
-def test_simple_model_has_no_empty_tokens(
-    fsm_builder: FsmBuilder, simple_model: type[TemplateModel]
-) -> None:
+def test_simple_model_has_no_empty_tokens(fsm_builder: FsmBuilder) -> None:
     """Test the simple model has no empty tokens."""
-    TemplateHasNoEmptyToken(fsm_builder).validate(simple_model)
+    validate_template_has_no_empty_token(fsm_builder, SimpleTestModel.template)
 
 
 def test_model_with_empty_tokens_fail_validation() -> None:
     """Test the model has empty tokens fail validation."""
     with pytest.raises(ValidityError):
 
-        class _TestModel(TemplateModel):
+        class _TestModel(Model):
             """Simple test model."""
 
-            __template__ = "{test}"
             test: str = string(".*")
+            template = model_template("{test}")
 
 
-def test_simple_model_has_no_collision(
-    fsm_builder: FsmBuilder, simple_model: type[TemplateModel]
-) -> None:
+def test_simple_model_has_no_collision(fsm_builder: FsmBuilder) -> None:
     """Make sure the simple test model is valid."""
-    TemplateHasNoCollision(fsm_builder).validate(simple_model)
+    validate_template_has_no_collision(fsm_builder, SimpleTestModel.template)
 
 
 def test_separator_are_used_in_construction(fsm_builder: FsmBuilder) -> None:
     """Make sure separator are taken into consideration when checking collision."""
 
-    class _TestModel(TemplateModel):
-        __template__ = "start_{foo}_{bar}_end"
+    class _TestModel(Model):
         foo: str = string(r"[a-zA-Z]+")
         bar: str = string(r"\d+")
+        template = model_template("start_{foo}_{bar}_end")
 
-    TemplateHasNoCollision(fsm_builder).validate(_TestModel)
+    validate_template_has_no_collision(fsm_builder, _TestModel.template)
 
 
 def test_success_on_complex_example() -> None:
     """Make sure a more complex regex template also works."""
 
-    class _TestModel(TemplateModel):
+    class _TestModel(Model):
         foo: str = string(r"[a-z][a-z_]+")
         bar: str = string(r"[a-z]+")
-        __template__ = "{foo}_{bar}"
+        template = model_template("{foo}_{bar}")
 
 
 def test_failing_on_colliding_model() -> None:
     """Make sure a nonbijective model fails validation."""
     with pytest.raises(ValidityError):
 
-        class _TestModel(TemplateModel):
-            __template__ = "start_{foo}_{bar}_end"
+        class _TestModel(Model):
             foo: str = string(r".+")
             bar: str = string(r"[^a]+")
+            template = model_template("start_{foo}_{bar}_end")
 
 
 def test_empty_field_succeed_with_no_validation() -> None:
     """Make sure validation passes with no validation."""
 
-    class _TestModel(TemplateModel, fsm_validation=False):
+    class _TestModel(Model):
         """Simple test model."""
 
-        __template__ = "{test}"
         test: str = string(".*")
+        template = model_template("{test}", fsm_validation_flags=FsmValidationFlag(0))
 
 
 def test_collision_succeed_with_no_validation() -> None:
     """Make sure validation passes with no validation."""
 
-    class _TestModel(TemplateModel, fsm_validation=False):
-        __template__ = "start_{foo}_{bar}_end"
+    class _TestModel(Model):
         foo: str = string(r".+")
         bar: str = string(r"[^a]+")
+        template = model_template(
+            "start_{foo}_{bar}_end", fsm_validation_flags=FsmValidationFlag(0)
+        )

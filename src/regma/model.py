@@ -4,126 +4,48 @@ from __future__ import annotations
 
 import collections
 import contextlib
-import re
-import typing
 from typing import Any
 from typing import ClassVar
 from typing import TypeVar
+from typing import Union
 
 from typing_extensions import Self  # noqa: UP035
 from typing_extensions import dataclass_transform
+from typing_extensions import get_type_hints
 
-from regma import reference
+from regma import DefinitionError
 from regma.core import AbstractField
 from regma.core import BoundField
-from regma.core import Chain
-from regma.core import Delimiter
-from regma.core import FieldReference
-from regma.core import FieldSep
-from regma.core import Separator
 from regma.core import Strictness
-from regma.error import DefinitionError
-from regma.error import ParseError
-from regma.field import ModelField
 from regma.field import choice
 from regma.field import custom_field
 from regma.field import integer
 from regma.field import string
-from regma.validation.field import FieldNameValidator
-from regma.validation.field import FieldReferenceValidator
-from regma.validation.fsm import FsmBuilder
-from regma.validation.fsm import FsmRegexCache
-from regma.validation.fsm import TemplateHasNoCollision
-from regma.validation.fsm import TemplateHasNoEmptyToken
+from regma.template import BoundTemplate
+from regma.template import Template
+from regma.template import create_bound_template
+
+T_mod = TypeVar("T_mod", bound="Model")
 
 
-def _get_reference(model_cls: TemplateModelMeta, attribute_name: str) -> FieldReference:
-    """Return the field reference of the given attribute."""
-    # Find the targeted field
-    attributes = attribute_name.split(".")
-    field_reference: FieldReference | None = None
-    lookup_obj = model_cls
-    attribute_full_name = ""
-    for attr in attributes:
-        if not attr:
-            continue
-
-        attribute_full_name += attr
-
-        try:
-            lookup_obj = getattr(lookup_obj, attr)
-        except AttributeError as e:
+def _validate_field_name(model_cls: ModelMeta) -> None:
+    for attr in (*model_cls.__model_refs__, *model_cls.__typed_fields__):
+        if attr.endswith("_"):
             msg = (
-                f"{model_cls.__name__}: "
-                f"could not find attribute {attr!r} in {lookup_obj}"
-            )
-            raise DefinitionError(msg) from e
-
-        if not isinstance(lookup_obj, AbstractField):
-            msg = (
-                f"{model_cls.__name__}: "
-                f"attribute {attribute_full_name!r} is not an AbstractField"
+                f"{model_cls.__name__}: field attribute {attr!r} cannot ends with "
+                f"underscore (reserved for regex construction)"
             )
             raise DefinitionError(msg)
 
-        field_reference = FieldReference(attribute_full_name, lookup_obj)
-        attribute_full_name += "."
-
-    if field_reference is None:
-        msg = f"Invalid attribute {attribute_name}"
-        raise DefinitionError(msg)
-
-    return field_reference
-
-
-def _parse_template(template_model: TemplateModelMeta) -> Chain:
-    """Convert a template string into a chain."""
-    template = template_model.__template__
-    delimiter = template_model.__delimiter__
-    token_re = delimiter.token_re()
-    pending_separator = ""
-    separators = []
-    fields: list[FieldReference] = []
-    cursor = 0
-
-    for m in token_re.finditer(template):
-        start, end = m.span()
-        attr_name: str = m.group(1)
-
-        separators.append(Separator(pending_separator + template[cursor:start]))
-        pending_separator = ""
-        field_reference = _get_reference(template_model, attr_name)
-        target = field_reference.target
-        # If we are referencing a model, we can reconstruct nodes from its chain
-        # This is to flatten the chain to atomic elements.
-        if isinstance(target, ModelField):
-            chain: Chain = target.model.__chain__
-            separators[-1] = Separator(
-                separators[-1].value + chain.start_separator.value
+        if "__" in attr:
+            msg = (
+                f"{model_cls.__name__}: field attribute {attr!r} cannot contains "
+                f"double underscores (reserved for regex construction)"
             )
-            for field_sep in chain.iter_field_seps():
-                field = field_sep.field
-                new_field = FieldReference(f"{attr_name}.{field.name}", field.target)
-                fields.append(new_field)
-                new_sep = Separator(field_sep.separator.value)
-                separators.append(new_sep)
-            pending_separator = separators.pop(-1).value
-        else:
-            fields.append(field_reference)
-
-        cursor = end
-
-    separators.append(Separator(template[cursor:]))
-
-    start_sep = separators.pop(0)
-    field_seps = [FieldSep(field, sep) for field, sep in zip(fields, separators)]  # noqa: B905
-    return Chain(start_sep, field_seps)
+            raise DefinitionError(msg)
 
 
-T_model = TypeVar("T_model", bound="TemplateModel")
-
-
-class TemplateModelMeta(type):
+class ModelMeta(type):
     """Validates and wires up a TemplateModel subclass at definition time.
 
     1. Injects ``name`` into all :class:`Field` and :class:`~regma.slot.Slot`
@@ -136,96 +58,74 @@ class TemplateModelMeta(type):
 
     __field_names__: list[str]
     __typed_fields__: dict[str, BoundField[AbstractField[Any]]]
-    __fields__: dict[str, BoundField[AbstractField[Any]]]
-    __model_fields__: dict[str, BoundField[ModelField[TemplateModel]]]
-    __template__: str
-    __delimiter__: Delimiter
-    __chain__: Chain
-    __regex__: str
+    __fields__: dict[str, BoundField[AbstractField[Any]] | type[Model]]
+    __model_refs__: dict[str, type[Model]]
+    __templates__: dict[Template[Model], BoundTemplate[Model]]
 
     def __new__(
         mcs,
         name: str,
         bases: tuple[type, ...],
         namespace: dict[str, Any],
-        **kwargs: Any,  # noqa: ANN401
-    ) -> TemplateModelMeta:
+        **_kwargs: Any,  # noqa: ANN401
+    ) -> ModelMeta:
         """Build the template model internals (fields -> bound fields, chain, regex)."""
-        cls: TemplateModelMeta = super().__new__(mcs, name, bases, namespace)
+        cls: ModelMeta = super().__new__(mcs, name, bases, namespace)
 
-        # Skip the bare TemplateModel base itself
-        if name == "TemplateModel":
+        # Skip the bare Model base itself
+        if name == "Model":
             return cls
 
         # Create bounded field objects
         __bound_fields: dict[str, BoundField[Any]] = {}
-        __model_fields: dict[str, BoundField[ModelField[TemplateModel]]] = {}
-        __fields: dict[str, BoundField[Any]] = {}
+        __model_refs: dict[str, type[Model]] = {}
+        __fields: dict[str, BoundField[AbstractField[Any]] | type[Model]] = {}
 
         # First evaluate the model field references by checking annotations
-        for attr, hint in typing.get_type_hints(cls).items():
+        for attr, hint in get_type_hints(cls).items():
             if not isinstance(hint, type):
                 continue
 
             attr_value = namespace.get(attr)
 
-            if issubclass(hint, TemplateModel) and attr_value is None:
-                model_field = ModelField(hint)
-                setattr(cls, attr, model_field)
-                new_model_bound_field = BoundField(attr, model_field)
-                __model_fields[attr] = new_model_bound_field
-                __fields[attr] = new_model_bound_field
+            if issubclass(hint, Model) and attr_value is None:
+                setattr(cls, attr, hint)
+                __model_refs[attr] = hint
+                __fields[attr] = hint
 
             elif isinstance(attr_value, AbstractField):
-                if isinstance(attr_value, ModelField):
-                    bound_model_field = BoundField(attr, attr_value)
-                    __model_fields[attr] = bound_model_field
-                    __fields[attr] = bound_model_field
-                else:
-                    new_field = BoundField(attr, attr_value)
-                    __bound_fields[attr] = BoundField(attr, attr_value)
-                    __fields[attr] = new_field
+                new_field = BoundField(attr, attr_value)
+                __bound_fields[attr] = BoundField(attr, attr_value)
+                __fields[attr] = new_field
 
         cls.__fields__ = __fields
         cls.__typed_fields__ = __bound_fields
-        cls.__model_fields__ = __model_fields
+        cls.__model_refs__ = __model_refs
 
-        FieldNameValidator().validate(cls)
-
-        # Validate template
-        __raw_template: Any = namespace.get("__template__")
-        if __raw_template is None:
-            msg = f"{name}: must define a '__template__'"
-            raise DefinitionError(msg)
-
+        _validate_field_name(cls)
         __contents = [namespace, *[b.__dict__ for b in bases]]
-        # Go through all bases to get the delimiter
-        __delimiters = (c.get("__delimiter__") for c in __contents)
-        __delimiter = next(d for d in __delimiters if d is not None)
 
-        if not isinstance(__delimiter, Delimiter):
-            msg = (
-                f"{name}: __delimiter__ must be a {Delimiter.__name__} instance, "
-                f"got {type(__delimiter).__name__!r}"
-            )
-            raise DefinitionError(msg)
+        # Process all the templates defined in the model
+        __bound_templates: dict[Template[Model], BoundTemplate[Model]] = {}
+        for attr_value in namespace.values():
+            if not isinstance(attr_value, Template):
+                continue
 
-        __chain: Chain = _parse_template(cls)
-        cls.__chain__ = __chain
-        FieldReferenceValidator().validate(cls)
+            __bound_template = create_bound_template(attr_value, cls)
+            __bound_templates[attr_value] = __bound_template
 
-        if kwargs.get("fsm_validation", True):
-            __fsm_builder = FsmBuilder(FsmRegexCache())
-            TemplateHasNoEmptyToken(__fsm_builder).validate(cls)
-            TemplateHasNoCollision(__fsm_builder).validate(cls)
-
-        cls.__regex__ = cls.__chain__.to_regex()
+        cls.__templates__ = __bound_templates
 
         return cls
 
 
+def reference(model_cls: type[Model]) -> Any:  # noqa: ANN401
+    """Return a model reference from the given model class."""
+    return model_cls
+
+
 @dataclass_transform(field_specifiers=(string, integer, choice, custom_field, reference))
-class TemplateModel(metaclass=TemplateModelMeta, fsm_validation=True):
+class Model(metaclass=ModelMeta, fsm_validation=True):
     r"""Base class for all declarative template models.
 
     Subclass to declare a typed, bidirectional string template:
@@ -247,16 +147,14 @@ class TemplateModel(metaclass=TemplateModelMeta, fsm_validation=True):
     """
 
     __dataclass_transform__: ClassVar[dict[str, Any]]
-    __chain__: Chain
-    __delimiter__ = Delimiter.CURLY
-    __typed_fields__: dict[str, BoundField[AbstractField[Any]]]
-    __fields__: dict[str, BoundField[AbstractField[Any]]]
-    __model_fields__: dict[str, BoundField[ModelField[TemplateModel]]]
-    __template__: str
+    __typed_fields__: ClassVar[dict[str, BoundField[AbstractField[Any]]]]
+    __fields__: ClassVar[dict[str, Union[BoundField[AbstractField[Any]], type[Model]]]]  # noqa: UP007 due to python 3.9 not supporting the | annotation
+    __model_refs__: ClassVar[dict[str, type[Model]]]
+    __templates__: ClassVar[dict[Template[Self], BoundTemplate[Self]]]
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
         """Initialize the template model with given kwargs arguments."""
-        fields = list(self.fields())
+        fields = list(self.__fields__)
 
         if len(args) > len(fields):
             msg = f"Expected {len(args)} arguments, got {len(fields)}"
@@ -287,7 +185,7 @@ class TemplateModel(metaclass=TemplateModelMeta, fsm_validation=True):
             return NotImplemented
         # All fields should be equals
         # Start with value fields to quicly eliminate two different objects
-        for field_name in self.fields():
+        for field_name in self.__fields__:
             if getattr(self, field_name) != getattr(other, field_name):
                 return False
 
@@ -295,23 +193,14 @@ class TemplateModel(metaclass=TemplateModelMeta, fsm_validation=True):
 
     def __hash__(self) -> int:
         """Return hash of model."""
-        return hash((type(self), *(getattr(self, attr) for attr in self.fields())))
-
-    def __str__(self) -> str:
-        """Return formatted representation of model."""
-        return self.format()
+        return hash((type(self), *(getattr(self, attr) for attr in self.__fields__)))
 
     def __repr__(self) -> str:
         """Return formatted representation of model."""
         kwargs_str = ", ".join(
-            [f"{name}={getattr(self, name)!r}" for name in self.fields()]
+            [f"{name}={getattr(self, name)!r}" for name in self.__fields__]
         )
         return f"{self.__class__.__name__}({kwargs_str})"
-
-    @classmethod
-    def fields(cls) -> dict[str, AbstractField[Any]]:
-        """Return the fields available in the template model."""
-        return {name: bt.field for name, bt in cls.__fields__.items()}
 
     @classmethod
     def from_flat_dict(
@@ -325,7 +214,7 @@ class TemplateModel(metaclass=TemplateModelMeta, fsm_validation=True):
         data_by_model_field: dict[str, dict[str, Any]] = collections.defaultdict(dict)
 
         for key, value in data.items():
-            if key in cls.__model_fields__:  # skipped, we have the sub attribute
+            if key in cls.__model_refs__:  # skipped, we have the sub attribute
                 continue
 
             field_split = key.split("__", maxsplit=1)
@@ -341,24 +230,8 @@ class TemplateModel(metaclass=TemplateModelMeta, fsm_validation=True):
                 data_by_model_field[attr][field_split[1]] = value
 
         for field_name, field_data in data_by_model_field.items():
-            sub_model_cls = cls.__model_fields__[field_name].field.model
+            sub_model_cls = cls.__model_refs__[field_name]
             sub_model = sub_model_cls.from_flat_dict(field_data, strictness_override)
             inst_kwargs[field_name] = sub_model
 
         return cls(**inst_kwargs)
-
-    @classmethod
-    def parse(cls, raw: str) -> Self:
-        """Return the parsed object of this model from the given raw string."""
-        r = re.match(cls.__regex__, raw)
-        if not r:
-            msg = f"Could not parse {raw!r} from {cls.__regex__!r}"
-            raise ParseError(msg)
-
-        # We assume that the regex already rejects invalid fields
-        # We can avoid doing a pass of validation here to speed things up
-        return cls.from_flat_dict(r.groupdict(), strictness_override=Strictness.NONE)
-
-    def format(self) -> str:
-        """Return the formatted string of this model."""
-        return self.__chain__.format(self)

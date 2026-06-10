@@ -1,14 +1,17 @@
 """Common configuration for tests in regma."""
 
+from __future__ import annotations
+
 import re
 
 from typing_extensions import override
 
-from regma import TemplateModel
+from regma import Model
 from regma.core import AbstractField
 from regma.error import ValidationError
 from regma.field import integer
 from regma.field import string
+from regma.template import model_template
 
 
 class AbstractTestField(AbstractField[str]):
@@ -73,25 +76,25 @@ class IntChoiceField(AbstractField[int]):
         return str(value)
 
 
-class SimpleTestModel(TemplateModel):
+class SimpleTestModel(Model):
     """Simple test model."""
 
-    __template__ = "{test}"
     test: str = string(".+")
+    template = model_template("{test}")
 
 
-class FooBarModel(TemplateModel):
+class FooBarModel(Model):
     """Model with two fields foo and bar."""
 
-    __template__ = "{foo}_{bar}"
     foo: str = string(r"[a-zA-Z0-9]+")
     bar: int = integer()
+    template = model_template("{foo}_{bar}")
 
 
-class ComplexModel(TemplateModel):
+class ComplexModel(Model):
     """Model with fields and model fields."""
 
-    __template__ = "/root/{foo_bar.foo}_{foo_bar.bar}_{foo}_{bar}"
     foo_bar: FooBarModel
     foo: str = string(r"[a-zA-Z0-9]+")
     bar: int = integer()
+    template = model_template("/root/{foo_bar.foo}_{foo_bar.bar}_{foo}_{bar}")

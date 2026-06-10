@@ -8,17 +8,13 @@ from regma import ParseError
 from regma import choice
 from regma import custom_field
 from regma import integer
-from regma import reference
 from regma import string
 from regma.core import Strictness
 from regma.field import ChoiceField
 from regma.field import CustomField
 from regma.field import IntField
-from regma.field import ModelField
 from regma.field import StrField
-from tests.conftest import FooBarModel
 from tests.conftest import IntChoiceField
-from tests.conftest import SimpleTestModel
 
 
 def test_str_field_pattern_init() -> None:
@@ -250,56 +246,3 @@ def test_custom_field_descriptor() -> None:
     descriptor = custom_field(field)
     assert isinstance(descriptor, CustomField)
     assert descriptor.field is field
-
-
-def test_model_field_init() -> None:
-    """Model field shall be initialized."""
-    model_cls = SimpleTestModel
-    model_field = ModelField(model_cls)
-    assert model_field.model is model_cls
-    assert model_field.get_supported_types() == (SimpleTestModel,)
-
-
-def test_model_field_regex() -> None:
-    """Regex returned by ModelField is the same regex as the model itself."""
-    model_cls = SimpleTestModel
-    assert ModelField(model_cls).to_regex() == model_cls.__regex__
-
-
-def test_model_field_extract_value() -> None:
-    """Model field always return the model parsed value."""
-    model_cls = FooBarModel
-    field = ModelField(model_cls)
-    assert field.parse_value("foo_1") == model_cls.parse("foo_1")
-
-
-def test_model_field_extract_fails_if_model_fails() -> None:
-    """PArsing shall fail if the value is not compatible with model template."""
-    model_cls = FooBarModel
-    field = ModelField(model_cls)
-    with pytest.raises(ParseError):
-        assert field.parse_value("foo")
-
-
-def test_model_field_format_value() -> None:
-    """Model field always return the model formatted value."""
-    model_cls = FooBarModel
-    field = ModelField(model_cls)
-    model_inst = FooBarModel("foo", 1)
-    assert field.format_value(model_inst) == model_inst.format()
-
-
-def test_model_field_format_fails_if_model_fails() -> None:
-    """PArsing shall fail if the value is not compatible with model template."""
-    model_cls = FooBarModel
-    field = ModelField(model_cls)
-    with pytest.raises(ParseError):
-        assert field.parse_value("foo")
-
-
-def test_model_field_descriptor() -> None:
-    """Model field descriptor shall return an CustomField."""
-    model_cls = SimpleTestModel
-    descriptor = reference(model_cls)
-    assert isinstance(descriptor, ModelField)
-    assert descriptor.model is model_cls

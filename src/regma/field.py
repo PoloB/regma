@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import abc
 import re
-from typing import TYPE_CHECKING
 from typing import Any
 from typing import TypeVar
 
@@ -14,9 +13,6 @@ from regma.core import AbstractField
 from regma.core import Strictness
 from regma.error import DefinitionError
 from regma.error import ValidationError
-
-if TYPE_CHECKING:
-    from regma.model import TemplateModel
 
 T_field = TypeVar("T_field")
 
@@ -217,52 +213,3 @@ class CustomField(AbstractField[T_field]):
 def custom_field(field: AbstractField[T_field]) -> Any:  # noqa: ANN401
     """Return a custom field wrapping the given definition."""
     return CustomField(field)
-
-
-T_field_model = TypeVar("T_field_model", bound="TemplateModel")
-
-
-class ModelField(AbstractField[T_field_model]):
-    """A template model wrapped as a field."""
-
-    def __init__(
-        self, model_cls: type[T_field_model], strictness: Strictness = Strictness.ALL
-    ) -> None:
-        """Initialize the model field."""
-        super().__init__(strictness=strictness)
-        self._model = model_cls
-
-    @property
-    def model(self) -> type[T_field_model]:
-        """Return the model wrapped by this field."""
-        return self._model
-
-    @override
-    def to_regex(self) -> str:
-        return self._model.__chain__.to_regex()
-
-    @override
-    def get_supported_types(self) -> tuple[type[T_field_model]]:
-        return (self._model,)
-
-    @override
-    def validate(self, value: T_field_model) -> None:
-        # Model is self validating
-        pass
-
-    @override
-    def _parse_value(self, raw: str) -> T_field_model:
-        return self._model.parse(raw)
-
-    @override
-    def _format_value(self, value: T_field_model) -> str:
-        return value.format()
-
-    def __getattr__(self, item: str) -> Any:  # noqa: ANN401
-        """Return the attribute of the underlying model class."""
-        return getattr(self._model, item)
-
-
-def reference(model_cls: type[T_field_model]) -> Any:  # noqa: ANN401
-    """Return a field wrapping an existing template model class."""
-    return ModelField(model_cls)

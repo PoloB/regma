@@ -12,20 +12,22 @@ from regma.error import RegmaError
 from regma.field import choice
 from regma.field import custom_field
 from regma.field import integer
-from regma.field import reference
 from regma.field import string
-from regma.model import TemplateModel
+from regma.model import Model
+from regma.model import reference
+from regma.template import model_template
 
 __all__ = [
     "DefinitionError",
     "FormatError",
+    "Model",
     "ParseError",
     "RegmaError",
-    "TemplateModel",
     "TemplateNode",
     "choice",
     "custom_field",
     "integer",
+    "model_template",
     "reference",
     "string",
 ]

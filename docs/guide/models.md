@@ -8,11 +8,11 @@ a bidirectional string template.
 ## Declaring a model
 
 ```python
-from regma import TemplateModel
+from regma import Model
 from regma.field import choice, string
 
 
-class Asset(TemplateModel):
+class Asset(Model):
     type: str = choice({"chr", "prp", "env"})
     code: str = string(r"[a-z][a-z0-9]+")
 
