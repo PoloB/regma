@@ -1,5 +1,7 @@
 """Common configuration for tests in regma."""
 
+from __future__ import annotations
+
 import re
 
 from typing_extensions import override
