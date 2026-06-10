@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import collections
 import contextlib
-import typing
 from typing import Any
 from typing import ClassVar
 from typing import TypeVar
+from typing import Union
 
 from typing_extensions import Self  # noqa: UP035
 from typing_extensions import dataclass_transform
+from typing_extensions import get_type_hints
 
 from regma import DefinitionError
 from regma.core import AbstractField
@@ -81,7 +82,7 @@ class ModelMeta(type):
         __fields: dict[str, BoundField[AbstractField[Any]] | type[Model]] = {}
 
         # First evaluate the model field references by checking annotations
-        for attr, hint in typing.get_type_hints(cls).items():
+        for attr, hint in get_type_hints(cls).items():
             if not isinstance(hint, type):
                 continue
 
@@ -147,7 +148,7 @@ class Model(metaclass=ModelMeta, fsm_validation=True):
 
     __dataclass_transform__: ClassVar[dict[str, Any]]
     __typed_fields__: ClassVar[dict[str, BoundField[AbstractField[Any]]]]
-    __fields__: ClassVar[dict[str, BoundField[AbstractField[Any]] | type[Model]]]
+    __fields__: ClassVar[dict[str, Union[BoundField[AbstractField[Any]], type[Model]]]]  # noqa: UP007 due to python 3.9 not supporting the | annotation
     __model_refs__: ClassVar[dict[str, type[Model]]]
     __templates__: ClassVar[dict[Template[Self], BoundTemplate[Self]]]
 
