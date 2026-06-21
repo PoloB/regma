@@ -7,11 +7,11 @@ import re
 from typing_extensions import override
 
 from regma import Model
+from regma import ModelTemplate
 from regma.core import AbstractField
 from regma.error import ValidationError
 from regma.field import integer
 from regma.field import string
-from regma.template import model_template
 
 
 class AbstractTestField(AbstractField[str]):
@@ -80,7 +80,9 @@ class SimpleTestModel(Model):
     """Simple test model."""
 
     test: str = string(".+")
-    template = model_template("{test}")
+
+
+simple_test_template = ModelTemplate(SimpleTestModel, "{test}")
 
 
 class FooBarModel(Model):
@@ -88,7 +90,9 @@ class FooBarModel(Model):
 
     foo: str = string(r"[a-zA-Z0-9]+")
     bar: int = integer()
-    template = model_template("{foo}_{bar}")
+
+
+foo_bar_template = ModelTemplate(FooBarModel, "{foo}_{bar}")
 
 
 class ComplexModel(Model):
@@ -97,4 +101,8 @@ class ComplexModel(Model):
     foo_bar: FooBarModel
     foo: str = string(r"[a-zA-Z0-9]+")
     bar: int = integer()
-    template = model_template("/root/{foo_bar.foo}_{foo_bar.bar}_{foo}_{bar}")
+
+
+complex_template = ModelTemplate(
+    ComplexModel, "/root/{foo_bar.foo}_{foo_bar.bar}_{foo}_{bar}"
+)

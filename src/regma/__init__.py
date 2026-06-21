@@ -15,19 +15,21 @@ from regma.field import integer
 from regma.field import string
 from regma.model import Model
 from regma.model import reference
-from regma.template import model_template
+from regma.template import ModelTemplate
+from regma.template import Template
 
 __all__ = [
     "DefinitionError",
     "FormatError",
     "Model",
+    "ModelTemplate",
     "ParseError",
     "RegmaError",
+    "Template",
     "TemplateNode",
     "choice",
     "custom_field",
     "integer",
-    "model_template",
     "reference",
     "string",
 ]

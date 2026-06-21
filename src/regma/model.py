@@ -21,9 +21,8 @@ from regma.field import choice
 from regma.field import custom_field
 from regma.field import integer
 from regma.field import string
-from regma.template import BoundTemplate
-from regma.template import Template
-from regma.template import create_bound_template
+from regma.template import ModelTemplate
+from regma.template import create_chain
 
 T_mod = TypeVar("T_mod", bound="Model")
 
@@ -60,7 +59,6 @@ class ModelMeta(type):
     __typed_fields__: dict[str, BoundField[AbstractField[Any]]]
     __fields__: dict[str, BoundField[AbstractField[Any]] | type[Model]]
     __model_refs__: dict[str, type[Model]]
-    __templates__: dict[Template[Model], BoundTemplate[Model]]
 
     def __new__(
         mcs,
@@ -95,6 +93,7 @@ class ModelMeta(type):
 
             elif isinstance(attr_value, AbstractField):
                 new_field = BoundField(attr, attr_value)
+                setattr(cls, attr, new_field)
                 __bound_fields[attr] = BoundField(attr, attr_value)
                 __fields[attr] = new_field
 
@@ -103,18 +102,6 @@ class ModelMeta(type):
         cls.__model_refs__ = __model_refs
 
         _validate_field_name(cls)
-        __contents = [namespace, *[b.__dict__ for b in bases]]
-
-        # Process all the templates defined in the model
-        __bound_templates: dict[Template[Model], BoundTemplate[Model]] = {}
-        for attr_value in namespace.values():
-            if not isinstance(attr_value, Template):
-                continue
-
-            __bound_template = create_bound_template(attr_value, cls)
-            __bound_templates[attr_value] = __bound_template
-
-        cls.__templates__ = __bound_templates
 
         return cls
 
@@ -150,7 +137,6 @@ class Model(metaclass=ModelMeta, fsm_validation=True):
     __typed_fields__: ClassVar[dict[str, BoundField[AbstractField[Any]]]]
     __fields__: ClassVar[dict[str, Union[BoundField[AbstractField[Any]], type[Model]]]]  # noqa: UP007 due to python 3.9 not supporting the | annotation
     __model_refs__: ClassVar[dict[str, type[Model]]]
-    __templates__: ClassVar[dict[Template[Self], BoundTemplate[Self]]]
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
         """Initialize the template model with given kwargs arguments."""

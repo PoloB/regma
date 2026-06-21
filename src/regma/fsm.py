@@ -19,8 +19,8 @@ if TYPE_CHECKING:
 
     from regma import Model
     from regma.core import Chain
-    from regma.core import FieldReference
-    from regma.core import FieldSep
+    from regma.core import Reference
+    from regma.core import RefSep
     from regma.template import BoundTemplate
 
 
@@ -200,13 +200,13 @@ def _generate_example(fsm: greenery.Fsm) -> str:
 class FsmFieldNode:
     """A finite state machine object corresponding to a template field."""
 
-    field_sep: FieldSep
+    field_sep: RefSep
     fsm: greenery.Fsm
 
     @property
     def field_name(self) -> str:
         """Return the field name."""
-        return self.field_sep.field.name
+        return self.field_sep.reference.name
 
     @property
     def separator(self) -> str:
@@ -345,15 +345,15 @@ def compute_collision(chain: Chain, fsm_builder: FsmBuilder) -> CollisionResult:
     for k, left_field_sep in enumerate(field_seps[:-1]):
         right_field_sep = field_seps[k + 1]
 
-        if chain.is_field_reused(left_field_sep.field) or chain.is_field_reused(
-            right_field_sep.field
+        if chain.is_reference_reused(left_field_sep.reference) or chain.is_reference_reused(
+            right_field_sep.reference
         ):
             continue
 
         # Compute the fsm of the field only to get better cache hits
-        left_field_fsm = fsm_builder.build_fsm(left_field_sep.field.to_regex())
+        left_field_fsm = fsm_builder.build_fsm(left_field_sep.reference.to_regex())
         left_sep_fsm = fsm_builder.build_fsm(left_field_sep.separator.to_regex())
-        right_field_fsm = fsm_builder.build_fsm(right_field_sep.field.to_regex())
+        right_field_fsm = fsm_builder.build_fsm(right_field_sep.reference.to_regex())
         right_sep_fsm = fsm_builder.build_fsm(right_field_sep.separator.to_regex())
         left_node = FsmFieldNode(left_field_sep, left_field_fsm + left_sep_fsm)
         right_node = FsmFieldNode(right_field_sep, right_field_fsm + right_sep_fsm)
@@ -438,11 +438,11 @@ def validate_template_has_no_empty_token(
     fsm_builder: FsmBuilder, template: BoundTemplate[T_mod]
 ) -> None:
     """Validate the template model."""
-    empty_fields: list[FieldReference] = []
+    empty_fields: list[Reference] = []
     for field_sep in template.chain.iter_field_seps():
-        field_fsm = fsm_builder.build_fsm(field_sep.field.to_regex())
+        field_fsm = fsm_builder.build_fsm(field_sep.reference.to_regex())
         if field_fsm.initial in field_fsm.finals:
-            empty_fields.append(field_sep.field)
+            empty_fields.append(field_sep.reference)
 
     if not empty_fields:
         return

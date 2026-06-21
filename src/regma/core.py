@@ -11,6 +11,7 @@ from typing import Any
 from typing import Generic
 from typing import TypeVar
 
+from typing_extensions import Self  # noqa: UP035
 from typing_extensions import override
 
 from regma.error import FormatError
@@ -39,18 +40,26 @@ class FormatNode(TemplateNode):
         """Return the formatted string of this template node."""
 
 
-class FieldSep:
-    """A field followed by a separator."""
+class ChainTokenNode(FormatNode):
+    """A format token node that can be used in a chain."""
 
-    def __init__(self, field: FieldReference, separator: Separator) -> None:
+    @abc.abstractmethod
+    def get_content_chain(self) -> Chain:
+        """Return the element as chain."""
+
+
+class RefSep:
+    """A reference followed by a separator."""
+
+    def __init__(self, reference: Reference, separator: Separator) -> None:
         """Initialize the field separator."""
-        self._field = field
+        self._reference = reference
         self._sep = separator
 
     @property
-    def field(self) -> FieldReference:
-        """Return the field."""
-        return self._field
+    def reference(self) -> Reference:
+        """Return the reference."""
+        return self._reference
 
     @property
     def separator(self) -> Separator:
@@ -58,57 +67,96 @@ class FieldSep:
         return self._sep
 
 
-class Chain(FormatNode):
+class Chain:
     """Ordered sequence of template nodes."""
 
-    def __init__(self, start_separator: Separator, field_seps: list[FieldSep]) -> None:
+    @classmethod
+    def empty(cls) -> Self:
+        """Return an empty chain."""
+        return cls(Separator(""), [])
+
+    def __init__(self, start_separator: Separator, field_seps: list[RefSep]) -> None:
         """Initialize the chain."""
         self._start_sep = start_separator
-        self._field_seps = field_seps
-        self._fields = [n.field for n in field_seps]
+        self._ref_seps = field_seps
+        self._ref_reuse: dict[Reference, bool] = {}
+        self._update_field_reuse()
 
-        self._field_reuse: dict[FieldReference, bool] = {}
+    def _update_field_reuse(self) -> None:
         seen_fields: set[str] = set()
+        for ref in self.iter_flatten_references():
+            reuse = ref.name in seen_fields
+            self._ref_reuse[ref] = reuse
+            seen_fields.add(ref.name)
 
-        for field in self._fields:
-            reuse = field.name in seen_fields
-            self._field_reuse[field] = reuse
-            seen_fields.add(field.name)
+    def using(self, attribute_name: str) -> Self:
+        """Return a new chain where all the references go through the given attribute."""
+        new_ref_seps: list[RefSep] = []
+        for field_sep in self._ref_seps:
+            new_ref = Reference(
+                f"{attribute_name}.{field_sep.reference.name}",
+                field_sep.reference.target,
+            )
+            new_ref_seps.append(RefSep(new_ref, field_sep.separator))
+
+        return self.__class__(Separator(self._start_sep.value), new_ref_seps)
+
+    def append_reference(self, reference: Reference):
+        self._ref_seps.append(RefSep(reference, Separator("")))
+        self._update_field_reuse()
+
+    def append_separator(self, separator: str) -> None:
+        """Add the string to the end of the chain."""
+        if not self._ref_seps:
+            self._start_sep = Separator(self._start_sep.value + separator)
+        else:
+            last_field_sep = self._ref_seps[-1]
+            self._ref_seps[-1] = RefSep(
+                last_field_sep.reference,
+                Separator(last_field_sep.separator.value + separator),
+            )
 
     @property
     def start_separator(self) -> Separator:
         """Return the first separator of the chain."""
         return self._start_sep
 
-    def iter_field_seps(self) -> Iterator[FieldSep]:
+    def iter_field_seps(self) -> Iterator[RefSep]:
         """Return the ordered sequence of template nodes."""
-        yield from self._field_seps
+        yield from self._ref_seps
 
-    @override
     def to_regex(self) -> str:
+        """Return the regex associated to the chain."""
         regexes = []
-        for field_sep in self._field_seps:
-            field = field_sep.field
-            field_name = field.name.replace(".", "__")
-            if self._field_reuse.get(field, False):
+        for field_sep in self._ref_seps:
+            ref = field_sep.reference
+            field_name = ref.name.replace(".", "__")
+            if self._ref_reuse.get(ref, False):
                 regex = rf"(?P={field_name})"
             else:
-                regex = rf"(?P<{field_name}>{field.to_regex()})"
+                regex = rf"(?P<{field_name}>{ref.to_regex()})"
             regexes.append(regex)
             regexes.append(field_sep.separator.to_regex())
         return self._start_sep.to_regex() + "".join(regexes)
 
-    @override
     def format(self, model: Model) -> str:
         """Return the formatted string of this chain."""
         return self._start_sep.format(model) + "".join(
-            f"{n.field.format(model)}{n.separator.format(model)}"
-            for n in self._field_seps
+            f"{n.reference.format(model)}{n.separator.format(model)}"
+            for n in self._ref_seps
         )
 
-    def is_field_reused(self, field: FieldReference) -> bool:
+    def is_reference_reused(self, reference: Reference) -> bool:
         """Return if given field is already used earlier in the chain."""
-        return self._field_reuse.get(field, False)
+        return self._ref_reuse.get(reference, False)
+
+    def iter_flatten_references(self) -> Iterator[Reference]:
+        """Iterate over all the flattened references in the chain."""
+        for ref_sep in self._ref_seps:
+            ref = ref_sep.reference
+            yield ref
+            ref_chain = ref.target.get_content_chain()
+            yield from ref_chain.iter_flatten_references()
 
 
 class Separator(FormatNode):
@@ -240,7 +288,7 @@ class Delimiter(enum.Enum):
 T_field = TypeVar("T_field", bound=AbstractField[Any])
 
 
-class BoundField(FormatNode, Generic[T_field]):
+class BoundField(ChainTokenNode, Generic[T_field]):
     """A field bound to a template model through an attribute."""
 
     def __init__(self, name: str, field: T_field) -> None:
@@ -277,17 +325,18 @@ class BoundField(FormatNode, Generic[T_field]):
     def format(self, model_inst: Model) -> str:
         return self._field.format_value(getattr(model_inst, self._name))
 
+    @override
+    def get_content_chain(self) -> Chain:
+        return Chain(Separator(""), [])
 
-class FieldReference(FormatNode):
-    """A referenced field in a model template.
 
-    This is used in the template parsing.
-    """
+class Reference:
+    """A referenced element in a template construction."""
 
-    def __init__(self, attribute_name: str, target_field: AbstractField[Any]) -> None:
+    def __init__(self, attribute_name: str, target: ChainTokenNode) -> None:
         """Initialize a FieldReference node."""
         self.__name = attribute_name
-        self._field = target_field
+        self._target = target
 
     @property
     def name(self) -> str:
@@ -295,18 +344,18 @@ class FieldReference(FormatNode):
         return self.__name
 
     @property
-    def target(self) -> AbstractField[Any]:
-        """Return the field referenced as a target field."""
-        return self._field
+    def target(self) -> ChainTokenNode:
+        """Return the referenced element."""
+        return self._target
 
-    @override
     def to_regex(self) -> str:
+        """Return the reference as a regex."""
         return self.target.to_regex()
 
-    @override
     def format(self, model: Model) -> str:
+        """Return the formatted value for the field."""
         value = model
         for attr in self.__name.split("."):
             value = getattr(value, attr)
 
-        return self._field.format_value(value)
+        return self._target.format(value)
