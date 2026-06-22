@@ -21,8 +21,6 @@ from regma.field import choice
 from regma.field import custom_field
 from regma.field import integer
 from regma.field import string
-from regma.template import ModelTemplate
-from regma.template import create_chain
 
 T_mod = TypeVar("T_mod", bound="Model")
 

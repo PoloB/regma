@@ -29,7 +29,7 @@ T_mod = TypeVar("T_mod", bound="Model")
 VALIDATE_FSM = True
 
 
-def _validate_field_references(template: BoundTemplate[T_mod]) -> None:
+def _validate_field_references(template: ModelTemplate[T_mod]) -> None:
     # Template shall contain all the element required to build its model references
 
     def _check_has_all_elements(
@@ -51,7 +51,9 @@ def _validate_field_references(template: BoundTemplate[T_mod]) -> None:
         for bound_name, model_ref_cls in model_cls_.__model_refs__.items():
             # Get all the references starting with the bound name
             model_refs = {r for r in references if r.startswith(bound_name)}
-            sub_references = {r.split(".", maxsplit=1)[1] for r in model_refs}
+            sub_references = {
+                r.split(".", maxsplit=1)[1] for r in model_refs if "." in r
+            }
             # Check recursively
             _check_has_all_elements(
                 model_ref_cls,
@@ -59,9 +61,7 @@ def _validate_field_references(template: BoundTemplate[T_mod]) -> None:
                 f"{parent_bound}.{bound_name}" if parent_bound else bound_name,
             )
 
-    ref_fields = {
-        field_sep.reference.name for field_sep in template.chain.iter_field_seps()
-    }
+    ref_fields = {ref.name for ref in template.chain.iter_flatten_references()}
 
     _check_has_all_elements(template.model, ref_fields, "")
 
@@ -76,7 +76,12 @@ def _get_reference(
         message = f"Invalid token {token_name!r}"
         raise DefinitionError(message)
 
-    reference: ChainTokenNode | type[Model] | None = tokens[attributes[0]]
+    try:
+        reference: ChainTokenNode | type[Model] | None = tokens[attributes[0]]
+    except KeyError as e:
+        msg = f"No element {attributes[0]!r} provided to template"
+        raise DefinitionError(msg) from e
+
     lookup_obj: Any = reference
     attribute_full_name = ""
 
@@ -109,7 +114,9 @@ def _get_reference(
     return Reference(token_name, reference)
 
 
-def create_chain(pattern: str, tokens: dict[str, ChainTokenNode | type[Model]]) -> Chain:
+def create_chain(
+    pattern: str, tokens: dict[str, ChainTokenNode | type[Model]]
+) -> Chain:
     """Convert a template string into a chain."""
     token_re = Delimiter.CURLY.token_re()
     chain = Chain.empty()
@@ -132,7 +139,9 @@ class Template(ChainTokenNode):
     """A template that can only be used for formatting."""
 
     def __init__(
-        self, pattern: str, **kwargs: ChainTokenNode | AbstractField[Any] | type[Model]
+        self,
+        pattern: str,
+        **kwargs: ChainTokenNode | AbstractField[Any] | type[Model],
     ) -> None:
         """Initialize the template."""
         all_kwargs: dict[str, ChainTokenNode | type[Model]] = {}
@@ -160,7 +169,7 @@ class Template(ChainTokenNode):
         return self._chain.to_regex()
 
     @override
-    def format(self, model: T_mod) -> str:
+    def format(self, model: Model) -> str:
         return self._chain.format(model)
 
     @override
@@ -168,10 +177,10 @@ class Template(ChainTokenNode):
         return self._chain
 
 
-class BoundTemplate(ChainTokenNode):
+class BoundTemplate(ChainTokenNode, Generic[T_mod]):
     """A template that can only be used for formatting."""
 
-    def __init__(self, name: str, template: ModelTemplate[Model]) -> None:
+    def __init__(self, name: str, template: ModelTemplate[T_mod]) -> None:
         """Initialize the bound template."""
         self._name = name
         self._chain = template.chain.using(name)
@@ -196,12 +205,21 @@ class ModelTemplate(Template, Generic[T_mod]):
         self, model_cls: type[T_mod], pattern: str, **kwargs: ChainTokenNode
     ) -> None:
         """Initialize the template with pattern and delimiter."""
-        all_kwargs: dict[str, ChainTokenNode | type[Model]] = model_cls.__fields__.copy()
+        all_kwargs: dict[str, ChainTokenNode | type[Model]] = {}
+        for k, v in model_cls.__fields__.items():
+            all_kwargs[k] = kwargs.get(k, v)
+
         all_kwargs.update(kwargs)
         super().__init__(pattern, **all_kwargs)
         self._model = model_cls
+        _validate_field_references(self)
 
-    def using(self, name: str) -> BoundTemplate:
+    @property
+    def model(self) -> type[T_mod]:
+        """Return the model object of this template."""
+        return self._model
+
+    def using(self, name: str) -> BoundTemplate[T_mod]:
         """Provide a new template through the given model instance."""
         return BoundTemplate(name, self)
 

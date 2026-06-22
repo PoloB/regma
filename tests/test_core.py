@@ -31,14 +31,18 @@ def test_chain_init() -> None:
 
 def test_chain_regex() -> None:
     """Chain shall return expected regex."""
-    field_sep = RefSep(Reference("test", StrField(".+")), Separator("end"))
+    field_sep = RefSep(
+        Reference("test", BoundField("test", StrField(".+"))), Separator("end")
+    )
     chain = Chain(Separator("start"), [field_sep])
     assert chain.to_regex() == r"start(?P<test>.+)end"
 
 
 def test_chain_format() -> None:
     """Chain shall return expected format."""
-    field_sep = RefSep(Reference("test", StrField(".+")), Separator("end"))
+    field_sep = RefSep(
+        Reference("test", BoundField("test", StrField(".+"))), Separator("end")
+    )
     chain = Chain(Separator("start"), [field_sep])
     assert chain.format(SimpleTestModel("test")) == "starttestend"
 
@@ -153,7 +157,7 @@ def test_bound_field_format() -> None:
 
 def test_field_reference_init() -> None:
     """A field reference shall init successfully."""
-    target_field = StrField(r"\w+")
+    target_field = BoundField("attr", StrField(r"\w+"))
     field_ref = Reference("attr", target_field)
     assert field_ref.name == "attr"
     assert field_ref.target is target_field
@@ -161,11 +165,11 @@ def test_field_reference_init() -> None:
 
 def test_field_reference_to_regex() -> None:
     """Test the field reference regex construction."""
-    field_ref = Reference("foo.bar", StrField(r"\w+"))
+    field_ref = Reference("foo.bar", BoundField("bar", StrField(r"\w+")))
     assert field_ref.to_regex() == r"\w+"
 
 
 def test_field_reference_format() -> None:
     """Test the field reference format."""
-    field_ref = Reference("foo_bar.bar", IntField())
+    field_ref = Reference("foo_bar.bar", BoundField("bar", IntField()))
     assert field_ref.format(ComplexModel(FooBarModel("foo", 2), "test", 1)) == "2"

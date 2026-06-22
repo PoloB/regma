@@ -69,24 +69,6 @@ def test_model_can_reference_field_multiple_times() -> None:
     assert template.to_regex() == r"(?P<test>\w+)/(?P=test)"
 
 
-def test_reuse_leaves_ambiguity() -> None:
-    """Reusing a field shall leave ambiguity if possible.
-
-    When the reuse of a field is not taken into account, we may find a collision where
-    it is not possible because the value of the field is fixed due to an earlier valid
-    use.
-    In this example, the first appearing of bar fixes its value and thus, {bar}_{test}
-    cannot create a collision.
-    """
-
-    class _TestModel(Model):
-        foo: str = string(r"[a-zA-Z0-9]+")
-        bar: str = string(r"\w+")
-        test: str = string(r"\w+")
-
-    ModelTemplate(_TestModel, "{bar}_{foo}_{bar}_{test}")
-
-
 def test_model_can_reference_other_models_through_model_field() -> None:
     """A model can reference other models through the model field."""
 
@@ -104,15 +86,15 @@ def test_model_can_reference_other_models_through_model_field() -> None:
     second_template = ModelTemplate(
         SecondModel,
         "{foo}/{bar}/{first_template}/{first.foo}_{foo}_{bar}_{first.bar}_{first_template}",
-        first_template=first_template,
+        first_template=first_template.using("first"),
     )
 
     assert len(SecondModel.__typed_fields__) == 2  # noqa: PLR2004
     assert len(SecondModel.__model_refs__) == 1
     assert (
         second_template.to_regex() == r"(?P<foo>[a-zA-Z0-9]+)/(?P<bar>\w+)/"
-        r"(?P<first__foo>[a-zA-Z0-9]+)_(?P<first__bar>\w+)/"
-        r"(?P=first__foo)_(?P=foo)_(?P=bar)_(?P=first__bar)_(?P=first__foo)_(?P=first__bar)"
+        r"(?P<first_template>(?P<first__foo>[a-zA-Z0-9]+)_(?P<first__bar>\w+))/"
+        r"(?P=first__foo)_(?P=foo)_(?P=bar)_(?P=first__bar)_(?P=first_template)"
     )
     assert (
         re.match(

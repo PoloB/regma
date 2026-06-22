@@ -32,20 +32,27 @@ class TemplateNode(abc.ABC):
         """Return the element as a regex."""
 
 
+T_mod = TypeVar("T_mod", bound="Model")
+
+
 class FormatNode(TemplateNode):
     """A node that can contribute to formatting a template model."""
 
     @abc.abstractmethod
     def format(self, model: Model) -> str:
-        """Return the formatted string of this template node."""
+        """Return the formatted string of this node for the given model instance."""
 
 
-class ChainTokenNode(FormatNode):
+class ChainTokenNode(TemplateNode):
     """A format token node that can be used in a chain."""
 
     @abc.abstractmethod
     def get_content_chain(self) -> Chain:
         """Return the element as chain."""
+
+    @abc.abstractmethod
+    def format(self, model: T_mod) -> str:
+        """Return the formatted string of this node for the given model instance."""
 
 
 class RefSep:
@@ -101,7 +108,8 @@ class Chain:
 
         return self.__class__(Separator(self._start_sep.value), new_ref_seps)
 
-    def append_reference(self, reference: Reference):
+    def append_reference(self, reference: Reference) -> None:
+        """Append the given reference to the chain."""
         self._ref_seps.append(RefSep(reference, Separator("")))
         self._update_field_reuse()
 
@@ -355,7 +363,7 @@ class Reference:
     def format(self, model: Model) -> str:
         """Return the formatted value for the field."""
         value = model
-        for attr in self.__name.split("."):
+        for attr in self.__name.split(".")[:-1]:
             value = getattr(value, attr)
 
         return self._target.format(value)

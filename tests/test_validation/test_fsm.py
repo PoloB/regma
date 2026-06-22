@@ -8,6 +8,7 @@ import pytest
 from regma import Model
 from regma import ModelTemplate
 from regma import string
+from regma.core import BoundField
 from regma.core import Chain
 from regma.core import Reference
 from regma.core import Separator
@@ -16,7 +17,6 @@ from regma.field import StrField
 from regma.fsm import CollisionResult
 from regma.fsm import FsmBuilder
 from regma.fsm import FsmRegexCache
-from regma.fsm import FsmValidationFlag
 from regma.fsm import compute_collision
 from regma.fsm import validate
 from regma.fsm import validate_template_has_no_collision
@@ -34,7 +34,7 @@ def test_fsm_builder_cache() -> None:
     """Verify the cache of fsm builder is working."""
     fsm_cache = FsmRegexCache()
     fsm_builder = FsmBuilder(fsm_cache)
-    field = Reference("test", StrField(".+"))
+    field = Reference("test", BoundField("test", StrField(".+")))
     regex = field.to_regex()
     fsm = fsm_builder.build_fsm(regex)
     assert isinstance(fsm, greenery.Fsm)
@@ -67,7 +67,7 @@ def test_model_with_empty_tokens_fail_validation() -> None:
     fsm_builder = FsmBuilder(FsmRegexCache())
 
     with pytest.raises(ValidityError):
-        validate(fsm_builder, template, FsmValidationFlag.EMPTY_TOKEN)
+        validate(fsm_builder, template)
 
 
 def test_simple_model_has_no_collision(fsm_builder: FsmBuilder) -> None:
@@ -94,7 +94,9 @@ def test_success_on_complex_example() -> None:
         foo: str = string(r"[a-z][a-z_]+")
         bar: str = string(r"[a-z]+")
 
-    ModelTemplate(_TestModel, "{foo}_{bar}")
+    template = ModelTemplate(_TestModel, "{foo}_{bar}")
+    fsm_builder = FsmBuilder(FsmRegexCache())
+    validate(fsm_builder, template)
 
 
 def test_failing_on_colliding_model() -> None:
@@ -107,7 +109,7 @@ def test_failing_on_colliding_model() -> None:
     fsm_builder = FsmBuilder(FsmRegexCache())
     template = ModelTemplate(_TestModel, "start_{foo}_{bar}_end")
     with pytest.raises(ValidityError):
-        validate(fsm_builder, template, FsmValidationFlag.COLLISION)
+        validate(fsm_builder, template)
 
 
 def test_empty_field_succeed_with_no_validation() -> None:
@@ -129,3 +131,23 @@ def test_collision_succeed_with_no_validation() -> None:
         bar: str = string(r"[^a]+")
 
     ModelTemplate(_TestModel, "start_{foo}_{bar}_end")
+
+
+def test_reuse_leaves_ambiguity() -> None:
+    """Reusing a field shall leave ambiguity if possible.
+
+    When the reuse of a field is not taken into account, we may find a collision where
+    it is not possible because the value of the field is fixed due to an earlier valid
+    use.
+    In this example, the first appearing of bar fixes its value and thus, {bar}_{test}
+    cannot create a collision.
+    """
+
+    class _TestModel(Model):
+        foo: str = string(r"[a-zA-Z0-9]+")
+        bar: str = string(r"\w+")
+        test: str = string(r"\w+")
+
+    template = ModelTemplate(_TestModel, "{bar}_{foo}_{bar}_{test}")
+    fsm_builder = FsmBuilder(FsmRegexCache())
+    validate(fsm_builder, template)

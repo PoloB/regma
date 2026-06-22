@@ -18,10 +18,10 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from regma import Model
+    from regma import Template
     from regma.core import Chain
     from regma.core import Reference
     from regma.core import RefSep
-    from regma.template import BoundTemplate
 
 
 def _left_reminder(fsm: greenery.Fsm) -> greenery.Fsm:
@@ -345,9 +345,9 @@ def compute_collision(chain: Chain, fsm_builder: FsmBuilder) -> CollisionResult:
     for k, left_field_sep in enumerate(field_seps[:-1]):
         right_field_sep = field_seps[k + 1]
 
-        if chain.is_reference_reused(left_field_sep.reference) or chain.is_reference_reused(
-            right_field_sep.reference
-        ):
+        if chain.is_reference_reused(
+            left_field_sep.reference
+        ) or chain.is_reference_reused(right_field_sep.reference):
             continue
 
         # Compute the fsm of the field only to get better cache hits
@@ -409,7 +409,7 @@ T_mod = TypeVar("T_mod", bound="Model")
 
 
 def validate_template_has_no_collision(
-    fsm_builder: FsmBuilder, template: BoundTemplate[T_mod]
+    fsm_builder: FsmBuilder, template: Template
 ) -> None:
     """Raise ValidityError if template has collision."""
     collision = compute_collision(template.chain, fsm_builder)
@@ -435,7 +435,7 @@ def validate_template_has_no_collision(
 
 
 def validate_template_has_no_empty_token(
-    fsm_builder: FsmBuilder, template: BoundTemplate[T_mod]
+    fsm_builder: FsmBuilder, template: Template
 ) -> None:
     """Validate the template model."""
     empty_fields: list[Reference] = []
@@ -468,11 +468,14 @@ class FsmValidationFlag(enum.Flag):
 
 
 def validate(
-    fsm_builder: FsmBuilder, template: BoundTemplate[T_mod], flag: FsmValidationFlag
+    fsm_builder: FsmBuilder, template: Template, flags: FsmValidationFlag | None = None
 ) -> None:
     """Validate the given template with respect to the given flags."""
-    if flag & FsmValidationFlag.EMPTY_TOKEN:
+    if not flags:
+        flags = FsmValidationFlag.all()
+
+    if flags & FsmValidationFlag.EMPTY_TOKEN:
         validate_template_has_no_empty_token(fsm_builder, template)
 
-    if flag & FsmValidationFlag.COLLISION:
+    if flags & FsmValidationFlag.COLLISION:
         validate_template_has_no_collision(fsm_builder, template)
