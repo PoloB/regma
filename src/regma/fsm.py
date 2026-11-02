@@ -11,7 +11,9 @@ from typing import TypeVar
 
 import greenery
 from typing_extensions import Self  # noqa: UP035
+from typing_extensions import override
 
+from regma.chain import ChainVisitor
 from regma.error import ValidityError
 
 if TYPE_CHECKING:
@@ -19,9 +21,9 @@ if TYPE_CHECKING:
 
     from regma import Model
     from regma import Template
-    from regma.core import Chain
-    from regma.core import Reference
-    from regma.core import RefSep
+    from regma.chain import Chain
+    from regma.chain import Reference
+    from regma.chain import RefSep
 
 
 def _left_reminder(fsm: greenery.Fsm) -> greenery.Fsm:
@@ -211,7 +213,7 @@ class FsmFieldNode:
     @property
     def separator(self) -> str:
         """Return the value of the separator."""
-        return self.field_sep.separator.value
+        return self.field_sep.suffix
 
 
 @dataclasses.dataclass(frozen=True)
@@ -331,12 +333,43 @@ class CollisionResult:
                 yield decomp.generate_colliding_example()
 
 
+class ReuseInspector(ChainVisitor[None]):
+    """Builds the regex for the given chain."""
+
+    def __init__(self) -> None:
+        """Initialize the default regex builder."""
+        self._seen_reference_names: set[str] = set()
+        self._is_reused: dict[str, bool] = {}
+
+    @override
+    def walk(self, chain: Chain) -> None:
+        for ref_sep in chain.iter_field_seps():
+            reference = ref_sep.reference
+            if reference.name in self._seen_reference_names:
+                self._is_reused[reference.name] = True
+                continue
+
+            self._seen_reference_names.add(reference.name)
+            self._is_reused[reference.name] = False
+            sub_chain = reference.target.to_chain()
+
+            if sub_chain:
+                self.walk(sub_chain.through_name(reference.name))
+
+    def is_reused(self, reference_name: str) -> bool:
+        """Return whether the given reference name is reused."""
+        return self._is_reused[reference_name]
+
+
 def compute_collision(chain: Chain, fsm_builder: FsmBuilder) -> CollisionResult:
     """Compute the collision within the fsm chain."""
     field_seps = list(chain.iter_field_seps())
 
     if not field_seps:
         return CollisionResult([])
+
+    reuse_inspector = ReuseInspector()
+    reuse_inspector.walk(chain)
 
     # Create frontiers between FieldReference
     # We skip any frontier that has a static fsm node
@@ -345,16 +378,16 @@ def compute_collision(chain: Chain, fsm_builder: FsmBuilder) -> CollisionResult:
     for k, left_field_sep in enumerate(field_seps[:-1]):
         right_field_sep = field_seps[k + 1]
 
-        if chain.is_reference_reused(
-            left_field_sep.reference
-        ) or chain.is_reference_reused(right_field_sep.reference):
+        if reuse_inspector.is_reused(
+            left_field_sep.reference.name
+        ) or reuse_inspector.is_reused(right_field_sep.reference.name):
             continue
 
         # Compute the fsm of the field only to get better cache hits
         left_field_fsm = fsm_builder.build_fsm(left_field_sep.reference.to_regex())
-        left_sep_fsm = fsm_builder.build_fsm(left_field_sep.separator.to_regex())
+        left_sep_fsm = fsm_builder.build_fsm(left_field_sep.suffix)
         right_field_fsm = fsm_builder.build_fsm(right_field_sep.reference.to_regex())
-        right_sep_fsm = fsm_builder.build_fsm(right_field_sep.separator.to_regex())
+        right_sep_fsm = fsm_builder.build_fsm(right_field_sep.suffix)
         left_node = FsmFieldNode(left_field_sep, left_field_fsm + left_sep_fsm)
         right_node = FsmFieldNode(right_field_sep, right_field_fsm + right_sep_fsm)
         frontier_nodes.append((left_node, right_node))

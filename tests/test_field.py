@@ -1,6 +1,9 @@
 """Tests the field module."""
 
+import re
+
 import pytest
+from typing_extensions import override
 
 from regma import DefinitionError
 from regma import FormatError
@@ -10,11 +13,156 @@ from regma import custom_field
 from regma import integer
 from regma import string
 from regma.core import Strictness
+from regma.error import ValidationError
+from regma.field import AbstractField
+from regma.field import BoundField
 from regma.field import ChoiceField
 from regma.field import CustomField
 from regma.field import IntField
 from regma.field import StrField
-from tests.conftest import IntChoiceField
+
+
+class AbstractTestField(AbstractField[str]):
+    """A basic field, as close as possible to abstract field."""
+
+    @override
+    def to_regex(self) -> str:
+        return ".+"
+
+    @override
+    def get_supported_types(self) -> tuple[type[str]]:
+        return (str,)
+
+    @override
+    def validate(self, value: str) -> None:
+        if value == "invalid":
+            msg = "Invalid value"
+            raise ValidationError(msg)
+
+    @override
+    def _parse_value(self, raw: str) -> str:
+        if raw == "unparseable":
+            msg = "Unparseable value"
+            raise ValueError(msg)
+        return raw
+
+    @override
+    def _format_value(self, value: str) -> str:
+        if value == "unformattable":
+            msg = "Unformattable value"
+            raise ValueError(msg)
+        return value
+
+
+class IntChoiceField(AbstractField[int]):
+    """An integer choice field."""
+
+    @override
+    def get_supported_types(self) -> tuple[type[int]]:
+        return (int,)
+
+    @override
+    def validate(self, value: int) -> None:
+        return
+
+    def __init__(self, choices: list[int]) -> None:
+        """Initialize the integer choice field."""
+        super().__init__()
+        self.choices = choices
+
+    @override
+    def _parse_value(self, raw: str) -> int:
+        return int(raw)
+
+    @override
+    def to_regex(self) -> str:
+        pattern = "|".join(re.escape(str(c)) for c in self.choices)
+        return rf"(?:{pattern})"
+
+    @override
+    def _format_value(self, value: int) -> str:
+        return str(value)
+
+
+def test_abstract_field_init() -> None:
+    """Test the initialization of abstract field."""
+    field = AbstractTestField()
+    assert field.strictness == Strictness.ALL
+    assert field.get_supported_types() == (str,)
+    assert field.to_regex() == ".+"
+
+
+def test_abstract_field_parse_value() -> None:
+    """Test the parsing of abstract field."""
+    field = AbstractTestField()
+    assert field.parse_value("test") == "test"
+
+
+def test_abstract_field_parse_value_fails() -> None:
+    """Parsing an invalid value shall raise ParseError."""
+    with pytest.raises(ParseError):
+        AbstractTestField().parse_value("invalid")
+
+
+def test_abstract_field_parse_value_success_if_not_strict() -> None:
+    """Parsing an invalid value shall success if not strict."""
+    assert AbstractTestField(Strictness.NONE).parse_value("invalid") == "invalid"
+
+
+def test_abstract_field_parse_value_fails_if_value_is_unparseable() -> None:
+    """Parsing an invalid value shall success if not strict."""
+    with pytest.raises(ParseError):
+        AbstractTestField(Strictness.NONE).parse_value("unparseable")
+
+
+def test_abstract_field_format_value_fails() -> None:
+    """Format an invalid value shall raise FormatError."""
+    with pytest.raises(FormatError):
+        AbstractTestField().format_value("invalid")
+
+
+def test_abstract_field_format_value_success_if_not_strict() -> None:
+    """Formatting an invalid value shall success if not strict."""
+    assert AbstractTestField(Strictness.NONE).format_value("invalid") == "invalid"
+
+
+def test_abstract_field_format_value_fails_if_value_is_unformattable() -> None:
+    """Formatting an invalid value shall success if not strict."""
+    with pytest.raises(FormatError):
+        AbstractTestField(Strictness.NONE).format_value("unformattable")
+
+
+def test_bound_field_init() -> None:
+    """Bound field init behaves as expected."""
+    field = StrField(r"\w+")
+    bound_field = BoundField("attr", field)
+    assert bound_field.name == "attr"
+    assert bound_field.field is field
+
+
+def test_bound_field_chain() -> None:
+    """Bound field init behaves as expected."""
+    field = StrField(r"\w+")
+    bound_field = BoundField("attr", field)
+    assert bound_field.to_chain() is None
+
+
+def test_bound_field_regex() -> None:
+    """Bound field regex behaves as expected."""
+    bound_field = BoundField("attr", StrField(r"\w+"))
+    assert bound_field.to_regex() == r"\w+"
+
+
+def test_bound_field_format() -> None:
+    """Bound field format behaves as expected."""
+    bound_field = BoundField("test", StrField(r"\w+"))
+    assert bound_field.format_value("test") == "test"
+
+
+def test_bound_field_parse() -> None:
+    """Bound field parse behaves as expected."""
+    bound_field = BoundField("test", StrField(r"\w+"))
+    assert bound_field.parse_value("test") == "test"
 
 
 def test_str_field_pattern_init() -> None:

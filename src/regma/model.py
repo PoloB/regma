@@ -6,6 +6,7 @@ import collections
 import contextlib
 from typing import Any
 from typing import ClassVar
+from typing import Generic
 from typing import TypeVar
 from typing import Union
 
@@ -14,9 +15,10 @@ from typing_extensions import dataclass_transform
 from typing_extensions import get_type_hints
 
 from regma import DefinitionError
-from regma.core import AbstractField
-from regma.core import BoundField
-from regma.core import Strictness
+from regma import Template
+from regma.core import AnyNode
+from regma.field import AbstractField
+from regma.field import BoundField
 from regma.field import choice
 from regma.field import custom_field
 from regma.field import integer
@@ -27,6 +29,13 @@ T_mod = TypeVar("T_mod", bound="Model")
 
 def _validate_field_name(model_cls: ModelMeta) -> None:
     for attr in (*model_cls.__model_refs__, *model_cls.__typed_fields__):
+        if attr.startswith("_"):
+            msg = (
+                f"{model_cls.__name__}: field attribute {attr!r} cannot starts with "
+                f"underscore (reserved for regex construction)"
+            )
+            raise DefinitionError(msg)
+
         if attr.endswith("_"):
             msg = (
                 f"{model_cls.__name__}: field attribute {attr!r} cannot ends with "
@@ -187,9 +196,7 @@ class Model(metaclass=ModelMeta, fsm_validation=True):
         return f"{self.__class__.__name__}({kwargs_str})"
 
     @classmethod
-    def from_flat_dict(
-        cls, data: dict[str, Any], strictness_override: Strictness | None = None
-    ) -> Self:
+    def from_dict(cls, data: dict[str, Any]) -> Self:
         """Return a model from the given flattened dictionary data.
 
         The input dict is assumed to be as the regex of the model would return it.
@@ -208,14 +215,55 @@ class Model(metaclass=ModelMeta, fsm_validation=True):
             if len(field_split) == 1:
                 with contextlib.suppress(KeyError):
                     inst_kwargs[attr] = cls.__typed_fields__[attr].field.parse_value(
-                        value, strictness_override
+                        value
                     )
             else:
                 data_by_model_field[attr][field_split[1]] = value
 
         for field_name, field_data in data_by_model_field.items():
             sub_model_cls = cls.__model_refs__[field_name]
-            sub_model = sub_model_cls.from_flat_dict(field_data, strictness_override)
+            sub_model = sub_model_cls.from_dict(field_data)
             inst_kwargs[field_name] = sub_model
 
         return cls(**inst_kwargs)
+
+
+class ModelTemplate(Template, Generic[T_mod]):
+    """Definition of a template for a model."""
+
+    def __init__(self, model_cls: type[T_mod], pattern: str) -> None:
+        """Initialize the template with pattern and delimiter."""
+        kwargs: dict[str, AbstractField[Any] | Template] = {}
+        for k, v in model_cls.__fields__.items():
+            if isinstance(v, BoundField):
+                kwargs[k] = v.field
+            else:
+                kwargs[k] = v
+
+        all_kwargs.update(kwargs)
+        super().__init__(pattern, **all_kwargs)
+        self._model = model_cls
+        _validate_field_references(self)
+
+    @property
+    def model(self) -> type[T_mod]:
+        """Return the model object of this template."""
+        return self._model
+
+    def using(self, name: str) -> BoundTemplate[T_mod]:
+        """Provide a new template through the given model instance."""
+        return BoundTemplate(name, self)
+
+    def parse(self, string: str) -> T_mod:
+        """Parse the given string through the template and return the model object."""
+        regex = self._chain.to_regex()
+        r = re.match(regex, string)
+        if not r:
+            msg = f"Could not parse {string!r} from {regex!r}"
+            raise ParseError(msg)
+
+        # We assume that the regex already rejects invalid fields
+        # We can avoid doing a pass of validation here to speed things up
+        return self._model.from_flat_dict(
+            r.groupdict(), strictness_override=Strictness.NONE
+        )

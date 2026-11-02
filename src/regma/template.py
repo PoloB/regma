@@ -1,158 +1,40 @@
-"""Template definition defined for models."""
+"""Define templates used as usable object for creating bidirectional patterns."""
 
 from __future__ import annotations
 
 import re
 from typing import TYPE_CHECKING
 from typing import Any
-from typing import Generic
 from typing import TypeVar
 
-from typing_extensions import override
-
 from regma import ParseError
-from regma.core import AbstractField
-from regma.core import BoundField
-from regma.core import Chain
-from regma.core import ChainTokenNode
-from regma.core import Delimiter
-from regma.core import Reference
-from regma.core import Strictness
-from regma.error import DefinitionError
+from regma.chain import Chain
+from regma.chain import ChainCompound
+from regma.field import AbstractField
+from regma.field import BoundField
 
 if TYPE_CHECKING:
+    from regma.core import AnyNode
     from regma.model import Model
 
 T_mod = TypeVar("T_mod", bound="Model")
 
 
-VALIDATE_FSM = True
-
-
-def _validate_field_references(template: ModelTemplate[T_mod]) -> None:
-    # Template shall contain all the element required to build its model references
-
-    def _check_has_all_elements(
-        model_cls_: type[Model], references: set[str], parent_bound: str
-    ) -> None:
-        # Check leaf fields are used in the template
-        missing_fields = set(model_cls_.__typed_fields__).difference(references)
-        if missing_fields:
-            # Rebuild the full missing field
-            missing_full_fields = sorted(
-                f"{parent_bound}.{missing_field}" for missing_field in missing_fields
-            )
-            msg = (
-                f"All fields of {parent_bound!r} are not used in "
-                f"{template.model.__name__} template (missing {missing_full_fields})"
-            )
-            raise DefinitionError(msg)
-
-        for bound_name, model_ref_cls in model_cls_.__model_refs__.items():
-            # Get all the references starting with the bound name
-            model_refs = {r for r in references if r.startswith(bound_name)}
-            sub_references = {
-                r.split(".", maxsplit=1)[1] for r in model_refs if "." in r
-            }
-            # Check recursively
-            _check_has_all_elements(
-                model_ref_cls,
-                sub_references,
-                f"{parent_bound}.{bound_name}" if parent_bound else bound_name,
-            )
-
-    ref_fields = {ref.name for ref in template.chain.iter_flatten_references()}
-
-    _check_has_all_elements(template.model, ref_fields, "")
-
-
-def _get_reference(
-    tokens: dict[str, ChainTokenNode | type[Model]], token_name: str
-) -> Reference:
-    """Return the field reference of the given token name."""
-    # Find the targeted field
-    attributes = token_name.split(".")
-    if not attributes:
-        message = f"Invalid token {token_name!r}"
-        raise DefinitionError(message)
-
-    try:
-        reference: ChainTokenNode | type[Model] | None = tokens[attributes[0]]
-    except KeyError as e:
-        msg = f"No element {attributes[0]!r} provided to template"
-        raise DefinitionError(msg) from e
-
-    lookup_obj: Any = reference
-    attribute_full_name = ""
-
-    for attr in attributes[1:]:
-        if not attr:
-            msg = f"Invalid token {token_name!r}"
-            raise DefinitionError(msg)
-
-        if isinstance(lookup_obj, Template):
-            reference = None  # Invalidate the bound template found earlier
-
-        attribute_full_name += attr
-
-        try:
-            lookup_obj = getattr(lookup_obj, attr)
-        except AttributeError as e:
-            msg = f"could not find attribute {attr!r} in {lookup_obj}"
-            raise DefinitionError(msg) from e
-
-        if isinstance(lookup_obj, ChainTokenNode):
-            reference = lookup_obj
-            continue
-
-        attribute_full_name += "."
-
-    if not isinstance(reference, ChainTokenNode):
-        msg = f"Invalid token {token_name}"
-        raise DefinitionError(msg)
-
-    return Reference(token_name, reference)
-
-
-def create_chain(
-    pattern: str, tokens: dict[str, ChainTokenNode | type[Model]]
-) -> Chain:
-    """Convert a template string into a chain."""
-    token_re = Delimiter.CURLY.token_re()
-    chain = Chain.empty()
-    cursor = 0
-
-    for m in token_re.finditer(pattern):
-        start, end = m.span()
-        attr_name: str = m.group(1)
-        chain.append_separator(pattern[cursor:start])
-
-        reference = _get_reference(tokens, attr_name)
-        chain.append_reference(reference)
-        cursor = end
-
-    chain.append_separator(pattern[cursor:])
-    return chain
-
-
-class Template(ChainTokenNode):
+class Template:
     """A template that can only be used for formatting."""
 
-    def __init__(
-        self,
-        pattern: str,
-        **kwargs: ChainTokenNode | AbstractField[Any] | type[Model],
-    ) -> None:
+    def __init__(self, pattern: str, **kwargs: AbstractField[Any] | Template) -> None:
         """Initialize the template."""
-        all_kwargs: dict[str, ChainTokenNode | type[Model]] = {}
+        all_kwargs: dict[str, AnyNode] = {}
         for name, field in kwargs.items():
             if isinstance(field, AbstractField):
                 all_kwargs[name] = BoundField(name, field)
-            else:
-                all_kwargs[name] = field
+            elif isinstance(field, Template):
+                all_kwargs[name] = ChainCompound(field.chain)
         self._pattern = pattern
         self._tokens = all_kwargs
-        self._chain = create_chain(pattern, self._tokens)
+        self._chain = Chain.from_pattern(pattern, **self._tokens)
+        self._regex = re.compile(self._chain.to_regex())
 
     @property
     def pattern(self) -> str:
@@ -164,75 +46,41 @@ class Template(ChainTokenNode):
         """Return the chain associated to this template."""
         return self._chain
 
-    @override
-    def to_regex(self) -> str:
-        return self._chain.to_regex()
-
-    @override
-    def format(self, model: Model) -> str:
-        return self._chain.format(model)
-
-    @override
-    def get_content_chain(self) -> Chain:
-        return self._chain
-
-
-class BoundTemplate(ChainTokenNode, Generic[T_mod]):
-    """A template that can only be used for formatting."""
-
-    def __init__(self, name: str, template: ModelTemplate[T_mod]) -> None:
-        """Initialize the bound template."""
-        self._name = name
-        self._chain = template.chain.using(name)
-
-    @override
-    def get_content_chain(self) -> Chain:
-        return self._chain
-
-    @override
-    def format(self, model: Model) -> str:
-        return self._chain.format(model)
-
-    @override
-    def to_regex(self) -> str:
-        return self._chain.to_regex()
-
-
-class ModelTemplate(Template, Generic[T_mod]):
-    """Definition of a template for a model."""
-
-    def __init__(
-        self, model_cls: type[T_mod], pattern: str, **kwargs: ChainTokenNode
-    ) -> None:
-        """Initialize the template with pattern and delimiter."""
-        all_kwargs: dict[str, ChainTokenNode | type[Model]] = {}
-        for k, v in model_cls.__fields__.items():
-            all_kwargs[k] = kwargs.get(k, v)
-
-        all_kwargs.update(kwargs)
-        super().__init__(pattern, **all_kwargs)
-        self._model = model_cls
-        _validate_field_references(self)
-
     @property
-    def model(self) -> type[T_mod]:
-        """Return the model object of this template."""
-        return self._model
+    def regex(self) -> re.Pattern[str]:
+        """Return the regex string of this template."""
+        return self._regex
 
-    def using(self, name: str) -> BoundTemplate[T_mod]:
-        """Provide a new template through the given model instance."""
-        return BoundTemplate(name, self)
+    def format(self, value: dict[str, Any]) -> str:
+        """Format this template with the given value."""
+        return self._chain.format(value)
 
-    def parse(self, string: str) -> T_mod:
-        """Parse the given string through the template and return the model object."""
-        regex = self._chain.to_regex()
-        r = re.match(regex, string)
-        if not r:
-            msg = f"Could not parse {string!r} from {regex!r}"
+    def parse(self, raw: str) -> dict[str, Any]:
+        """Parse this template with the given string."""
+        data = self._regex.match(raw)
+        if not data:
+            msg = f"Template regex {self._regex.pattern} does not match {raw}."
             raise ParseError(msg)
 
-        # We assume that the regex already rejects invalid fields
-        # We can avoid doing a pass of validation here to speed things up
-        return self._model.from_flat_dict(
-            r.groupdict(), strictness_override=Strictness.NONE
-        )
+        # Reconstruct the nested dict from data
+        nested_data: dict[str, Any] = {}
+
+        for key, value in data.groupdict().items():
+            split_key = key.split("__")
+
+            sub_data = nested_data
+            for sub_key in split_key[:-1]:
+                new_data: dict[str, Any] = nested_data.get(sub_key, {})
+                if not isinstance(new_data, dict):
+                    new_data = {}
+                    nested_data[sub_key] = new_data
+                sub_data = new_data
+
+            sub_data[split_key[-1]] = value
+
+        converted_data: dict[str, Any] = {}
+
+        for token_name, token in self._tokens.items():
+            converted_data[token_name] = token.parse_value(nested_data[token_name])
+
+        return converted_data

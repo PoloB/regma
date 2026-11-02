@@ -10,9 +10,24 @@ from regma import ModelTemplate
 from regma import ParseError
 from regma.field import integer
 from regma.field import string
-from tests.conftest import ComplexModel
-from tests.conftest import FooBarModel
-from tests.conftest import complex_template
+
+
+class FooBarModel(Model):
+    """Model with two fields foo and bar."""
+
+    foo: str = string(r"[a-zA-Z0-9]+")
+    bar: int = integer()
+
+
+foo_bar_template = ModelTemplate(FooBarModel, "{foo}_{bar}")
+
+
+class ComplexModel(Model):
+    """Model with fields and model fields."""
+
+    foo_bar: FooBarModel
+    foo: str = string(r"[a-zA-Z0-9]+")
+    bar: int = integer()
 
 
 def test_validate_simple_model_with_field() -> None:
@@ -32,7 +47,7 @@ def test_fields_are_extracted_correctly() -> None:
 
     assert len(TestModel.__typed_fields__) == 1
     assert "test" in TestModel.__typed_fields__
-    assert template.chain.start_separator.value == ""
+    assert template.chain.start_prefix == ""
     assert len(list(template.chain.iter_field_seps())) == 1
     assert template.to_regex() == r"(?P<test>\w+)"
 
@@ -47,11 +62,11 @@ def test_sep_fields_are_extracted_correctly() -> None:
 
     assert len(TestModel.__typed_fields__) == 1
     assert "test" in TestModel.__typed_fields__
-    assert template.chain.start_separator.value == "sep"
+    assert template.chain.start_prefix == "sep"
     field_seps = list(template.chain.iter_field_seps())
     assert len(field_seps) == 1
     assert field_seps[0].reference.name == "test"
-    assert field_seps[0].separator.value == "other"
+    assert field_seps[0].suffix == "other"
     assert template.to_regex() == r"sep(?P<test>\w+)other"
 
 
