@@ -40,6 +40,7 @@ test = [
 lint = [
     "mypy>=1.19.1",
     "ruff>=0.15.5",
+    "ty>=0.0.96",
 ]
 docs = [
     "mkdocs>=1.6",

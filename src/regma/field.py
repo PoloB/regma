@@ -10,18 +10,19 @@ from typing import TypeVar
 
 from typing_extensions import override
 
-from regma import FormatError
-from regma import Node
-from regma import ParseError
+from regma.core import Node
 from regma.core import Strictness
+from regma.core import Token
 from regma.error import DefinitionError
+from regma.error import FormatError
+from regma.error import ParseError
 from regma.error import ValidationError
 
 T_field = TypeVar("T_field", bound=Any)
 
 
-class AbstractField(abc.ABC, Generic[T_field]):
-    """Abstract base for all atomic fields."""
+class AbstractField(Token, Generic[T_field]):
+    """Abstract base for all atomic fields, which templates can use as tokens."""
 
     def __init__(self, strictness: Strictness = Strictness.ALL) -> None:
         """Initialize the field."""
@@ -33,6 +34,10 @@ class AbstractField(abc.ABC, Generic[T_field]):
     def strictness(self) -> Strictness:
         """Return the strictness of the field."""
         return self._strictness
+
+    @override
+    def to_node(self, name: str) -> BoundField[T_field]:
+        return BoundField(name, self)
 
     @abc.abstractmethod
     def to_regex(self) -> str:

@@ -5,12 +5,13 @@ from __future__ import annotations
 import pytest
 
 from regma.chain import Chain
-from regma.chain import ChainCompound
+from regma.chain import ChainAlias
 from regma.chain import Reference
 from regma.chain import RefSep
 from regma.error import DefinitionError
 from regma.field import BoundField
 from regma.field import StrField
+from regma.template import Template
 
 
 @pytest.fixture
@@ -68,21 +69,21 @@ def chain(ref_sep: RefSep) -> Chain:
     return Chain("start", [ref_sep])
 
 
-def test_chain_compound_init(chain: Chain) -> None:
-    """Test the chain compound init."""
-    compound = ChainCompound(chain)
-    assert compound.to_chain() is chain
+def test_chain_alias_init(chain: Chain) -> None:
+    """Test the chain alias init."""
+    alias = ChainAlias(chain)
+    assert alias.to_chain() is chain
 
 
 @pytest.fixture
-def chain_compound(chain: Chain) -> ChainCompound:
-    """Return a chain compound object for testing."""
-    return ChainCompound(chain)
+def alias(chain: Chain) -> ChainAlias:
+    """Return a chain alias object for testing."""
+    return ChainAlias(chain)
 
 
-def test_chain_compound_regex(chain_compound: ChainCompound) -> None:
-    """Test the regex of chain compound."""
-    assert chain_compound.to_regex() == r"start(?P<reference>.+)end"
+def test_chain_alias_regex(alias: ChainAlias) -> None:
+    """Test the regex of chain alias."""
+    assert alias.to_regex() == r"start(?P<reference>.+)end"
 
 
 def test_chain_regex(chain: Chain) -> None:
@@ -98,16 +99,14 @@ def test_chain_use_back_reference(reference: Reference) -> None:
 
 @pytest.fixture
 def nested_chain() -> Chain:
-    """Return a chain compound object for testing."""
-    bound_field1 = BoundField("field1", StrField(r".+"))
-    bound_field2 = BoundField("field2", StrField(r"\w+"))
-
-    chain1 = Chain.from_pattern(
-        "{field1}_{field2}", field1=bound_field1, field2=bound_field2
+    """Return a chain nesting the chain of a template node for testing."""
+    template = Template(
+        "{field1}_{field2}", field1=StrField(r".+"), field2=StrField(r"\w+")
     )
-    chain_compound = ChainCompound(chain1)
 
-    return Chain.from_pattern("{chain1.field1}_{chain1}/{chain1}", chain1=chain_compound)
+    return Chain.from_pattern(
+        "{chain1.field1}_{chain1}/{chain1}", chain1=template.to_node("chain1")
+    )
 
 
 def test_chain_use_back_reference_on_nested_nodes(nested_chain: Chain) -> None:
@@ -148,13 +147,18 @@ def test_chain_from_pattern_fails_with_invalid_attribute(
 
 def test_chain_fails_on_missing_nested_node() -> None:
     """Test building a chain from pattern fails on missing nested node."""
-    bound_field1 = BoundField("field1", StrField(r".+"))
-
-    chain1 = Chain.from_pattern("{field1}", field1=bound_field1)
-    chain_compound = ChainCompound(chain1)
+    template = Template("{field1}", field1=StrField(r".+"))
 
     with pytest.raises(DefinitionError):
-        Chain.from_pattern("{chain1.field2}", chain1=chain_compound)
+        Chain.from_pattern("{chain1.field2}", chain1=template.to_node("chain1"))
+
+
+def test_chain_splices_alias(bound_field: BoundField[str]) -> None:
+    """A chain shall replace an alias by the references of the alias chain."""
+    alias = ChainAlias(Chain.from_pattern("<{test}>", test=bound_field))
+    chain = Chain.from_pattern("{alias}/{test}", alias=alias, test=bound_field)
+
+    assert chain.to_regex() == r"<(?P<test>.+)>/(?P=test)"
 
 
 def test_cannot_initialize_chain_with_invalid_fields() -> None:
@@ -179,17 +183,17 @@ def test_chain_format(chain: Chain) -> None:
     assert chain.format({"reference": "test"}) == "starttestend"
 
 
-def test_chain_compound_format(nested_chain: Chain) -> None:
-    """Chain shall return expected format."""
-    chain_compound = ChainCompound(nested_chain)
+def test_chain_alias_format(nested_chain: Chain) -> None:
+    """A chain alias shall format the value of the node holding it."""
+    alias = ChainAlias(nested_chain)
     assert (
-        chain_compound.format_value({"chain1": {"field1": "c1f1", "field2": "c1f2"}})
+        alias.format_value({"chain1": {"field1": "c1f1", "field2": "c1f2"}})
         == "c1f1_c1f1_c1f2/c1f1_c1f2"
     )
 
 
-def test_chain_compound_parse(nested_chain: Chain) -> None:
-    """Chain shall return expected parse."""
-    chain_compound = ChainCompound(nested_chain)
+def test_chain_alias_parse(nested_chain: Chain) -> None:
+    """A chain alias shall return the raw values of the node holding it."""
+    alias = ChainAlias(nested_chain)
     data = {"chain1": {"field1": "c1f1", "field2": "c1f2"}}
-    assert chain_compound.parse_value(data) == data
+    assert alias.parse_value(data) == data

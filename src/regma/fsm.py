@@ -19,11 +19,11 @@ from regma.error import ValidityError
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from regma import Model
-    from regma import Template
     from regma.chain import Chain
     from regma.chain import Reference
     from regma.chain import RefSep
+    from regma.model import Model
+    from regma.template import Template
 
 
 def _left_reminder(fsm: greenery.Fsm) -> greenery.Fsm:

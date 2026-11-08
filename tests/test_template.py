@@ -1,12 +1,55 @@
 """Tests for templates."""
 
+from __future__ import annotations
+
+import datetime
+from typing import TYPE_CHECKING
 from typing import Any
 
 import pytest
+from typing_extensions import override
 
+from regma import DefinitionError
+from regma import FormatError
+from regma import Model
+from regma import Node
 from regma import ParseError
 from regma import Template
+from regma import Token
+from regma import integer
+from regma import model_template
+from regma import reference
+from regma import string
+from regma.chain import Chain
+from regma.field import IntField
 from regma.field import StrField
+
+if TYPE_CHECKING:
+    from regma.core import AnyNode
+
+
+class AssetModel(Model):
+    """Model declaring templates."""
+
+    type: str = string(r"[a-z]+")
+    code: str = string(r"[a-z]+")
+    name = model_template("{type}_{code}")
+    folder = model_template("/root/{type}/{code}")
+
+
+class VariantModel(Model):
+    """Model with a sub-model, declaring a template using the ones of the sub-model."""
+
+    asset: AssetModel = reference(AssetModel)
+    code: str = string(r"[a-z]+")
+    folder = model_template("{asset.folder}/variant_{code}")
+
+
+class VersionModel(Model):
+    """Model of a padded number."""
+
+    number: int = integer(maximum=500, padding=3)
+    name = model_template("v{number}")
 
 
 def test_template_init() -> None:
@@ -81,3 +124,181 @@ def test_template_parse_fail() -> None:
 
     with pytest.raises(ParseError):
         template.parse("abc")
+
+
+def test_template_parses_values_of_nested_templates() -> None:
+    """The value of a template token shall be the value of that template."""
+    number = Template("{n}", n=integer())
+    template = Template(
+        "{a}/{b}/{asset}", a=number, b=Template("{c}", c=number), asset=AssetModel.name
+    )
+    value = {
+        "a": {"n": 1},
+        "b": {"c": {"n": 2}},
+        "asset": {"type": "chr", "code": "toto"},
+    }
+
+    assert template.parse("1/2/chr_toto") == value
+    assert template.format(value) == "1/2/chr_toto"
+
+
+def test_template_reaches_tokens_of_template_token() -> None:
+    """Dotted tokens shall reach the tokens of a template token."""
+    template = Template("{t}/{t.b}", t=Template("{a}_{b}", a=string("a"), b=string("b")))
+
+    assert template.regex.pattern == r"(?P<t>(?P<t__a>a)_(?P<t__b>b))/(?P=t__b)"
+    assert template.parse("a_b/b") == {"t": {"a": "a", "b": "b"}}
+
+
+def test_template_model_token_reaches_fields() -> None:
+    """A model token shall reach the fields of the model through dotted tokens."""
+    template = Template("{asset.type}/{asset.code}", asset=AssetModel)
+    asset = AssetModel("chr", "toto")
+
+    assert template.regex.pattern == r"(?P<asset__type>[a-z]+)/(?P<asset__code>[a-z]+)"
+    assert template.parse("chr/toto") == {"asset": asset}
+    assert template.format({"asset": asset}) == "chr/toto"
+
+
+def test_template_model_token_reaches_declared_templates() -> None:
+    """A model token shall reach the templates declared on the model and sub-models."""
+    template = Template(
+        "{variant.folder}/{variant.asset.name}_{variant.code}", variant=VariantModel
+    )
+    variant = VariantModel(AssetModel("chr", "toto"), "red")
+
+    assert template.format({"variant": variant}) == (
+        "/root/chr/toto/variant_red/chr_toto_red"
+    )
+    assert template.parse("/root/chr/toto/variant_red/chr_toto_red") == {
+        "variant": variant
+    }
+    with pytest.raises(ParseError):
+        template.parse("/root/chr/toto/variant_red/chr_titi_red")
+
+
+def test_template_mixes_fields_and_model_tokens() -> None:
+    """The value of a template shall hold a model instance for each model token."""
+    template = Template(
+        "{variant.folder}/task_{task}/{version.name}",
+        variant=VariantModel,
+        task=string(r"[a-z]+"),
+        version=VersionModel,
+    )
+    value = {
+        "variant": VariantModel(AssetModel("chr", "toto"), "red"),
+        "task": "rig",
+        "version": VersionModel(3),
+    }
+    path = "/root/chr/toto/variant_red/task_rig/v003"
+    parsed = template.parse(path)
+
+    assert template.format(value) == path
+    assert parsed == value
+    assert type(parsed["version"]) is VersionModel
+    # The values follow the order of the token definitions
+    assert list(parsed) == ["variant", "task", "version"]
+
+
+def test_template_ignores_tokens_missing_from_pattern() -> None:
+    """The tokens which are not in the pattern shall have no value."""
+    template = Template(
+        "{asset.name}", asset=AssetModel, version=VersionModel, task=string(r"[a-z]+")
+    )
+    asset = AssetModel("chr", "toto")
+
+    assert template.parse("chr_toto") == {"asset": asset}
+    assert template.format({"asset": asset}) == "chr_toto"
+
+
+def test_template_validates_model_values() -> None:
+    """The values of the model fields shall be validated as in model templates."""
+    template = Template("{version.name}", version=VersionModel)
+
+    with pytest.raises(FormatError):
+        template.format({"version": VersionModel(600)})
+    with pytest.raises(ParseError):
+        template.parse("v600")
+
+
+def test_template_fails_referencing_whole_model() -> None:
+    """A model has no pattern of its own, so a token cannot be the whole model."""
+    with pytest.raises(DefinitionError, match=r"\{asset\} is the model AssetModel"):
+        Template("{asset}", asset=AssetModel)
+
+    with pytest.raises(
+        DefinitionError, match=r"\{variant\.asset\} is the model AssetModel"
+    ):
+        Template("{variant.asset}/{variant.code}", variant=VariantModel)
+
+
+def test_template_fails_with_missing_model_field() -> None:
+    """A template shall capture all the fields of a model to build its instance."""
+    with pytest.raises(DefinitionError, match=r"\['variant\.asset\.code'\]"):
+        Template("{variant.asset.type}/{variant.code}", variant=VariantModel)
+
+
+def test_template_fails_referencing_unknown_element_of_model() -> None:
+    """A token reaching neither a field nor a template of a model shall fail."""
+    with pytest.raises(DefinitionError):
+        Template("{asset.nope}", asset=AssetModel)
+
+    with pytest.raises(DefinitionError):
+        Template("{variant.nope.name}", variant=VariantModel)
+
+    # A declared template stands for references to the fields of its model
+    with pytest.raises(DefinitionError, match=r"'asset\.name' has no 'type'"):
+        Template("{asset.name.type}", asset=AssetModel)
+
+
+class _DateNode(Node[datetime.date, dict[str, Any]]):
+    """Node of a date written as year-month-day, reaching its numbers."""
+
+    def __init__(self) -> None:
+        """Initialize the node from the padded numbers of the date."""
+        nodes = {
+            name: IntField(padding=padding).to_node(name)
+            for name, padding in (("year", 4), ("month", 2), ("day", 2))
+        }
+        self._chain = Chain.from_pattern("{year}-{month}-{day}", **nodes)
+
+    @override
+    def to_regex(self) -> str:
+        return self._chain.to_regex()
+
+    @override
+    def to_chain(self) -> Chain:
+        return self._chain
+
+    @override
+    def format_value(self, value: datetime.date) -> str:
+        return self._chain.format(value)
+
+    @override
+    def parse_value(self, raw: dict[str, Any]) -> datetime.date:
+        return datetime.date(int(raw["year"]), int(raw["month"]), int(raw["day"]))
+
+
+class _DateToken(Token):
+    """A date as a token."""
+
+    @override
+    def to_node(self, name: str) -> AnyNode:
+        return _DateNode()
+
+
+def test_template_accepts_new_kinds_of_tokens() -> None:
+    """A template shall use any token through its node, expanding its chain."""
+    template = Template(
+        "{shot}_{date}/{date.year}", shot=string("[a-z]+"), date=_DateToken()
+    )
+    value = {"shot": "foo", "date": datetime.date(2024, 5, 1)}
+
+    assert template.regex.pattern == (
+        r"(?P<shot>[a-z]+)_(?P<date>(?P<date__year>\d{4})\-(?P<date__month>\d{2})"
+        r"\-(?P<date__day>\d{2}))/(?P=date__year)"
+    )
+    assert template.format(value) == "foo_2024-05-01/2024"
+    assert template.parse("foo_2024-05-01/2024") == value
+    with pytest.raises(ParseError):
+        template.parse("foo_2024-05-01/2025")

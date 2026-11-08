@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import abc
 import re
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Generic
@@ -14,6 +15,7 @@ from typing_extensions import override
 from regma.core import AnyNode
 from regma.core import Delimiter
 from regma.core import Node
+from regma.core import Token
 from regma.error import DefinitionError
 
 if TYPE_CHECKING:
@@ -42,11 +44,18 @@ class Reference:
         """Return the reference as a regex."""
         return self.target.to_regex()
 
-    def format(self, value: dict[str, Any]) -> str:
-        """Return the formatted value for the field."""
-        ref_value = value
+    def format(self, value: object) -> str:
+        """Return the formatted value for the field.
+
+        The value holds the value of each token by key, or by attribute for models.
+        """
+        ref_value: Any = value
         for attr in self.__name.split("."):
-            ref_value = ref_value[attr]
+            ref_value = (
+                ref_value[attr]
+                if isinstance(ref_value, Mapping)
+                else getattr(ref_value, attr)
+            )
 
         return self._target.format_value(ref_value)
 
@@ -144,21 +153,12 @@ def _get_reference(tokens: dict[str, AnyNode], token_name: str) -> Reference:
         raise DefinitionError(msg) from e
 
     for attr in attributes[1:]:
+        sub_node = lookup_node.get_nodes().get(attr)
+        if sub_node is None:
+            msg = f"Invalid token {token_name!r}: {current_attr!r} has no {attr!r}"
+            raise DefinitionError(msg)
+
         current_attr = f"{current_attr}.{attr}"
-
-        if not isinstance(lookup_node, ChainCompound):
-            msg = (
-                f"Invalid token {token_name!r}: {current_attr!r} is not referring a "
-                f"compound element"
-            )
-            raise DefinitionError(msg)
-
-        chain_compound: ChainCompound = lookup_node
-        sub_node = chain_compound.get_node(attr)
-        if not sub_node:
-            msg = f"could not find node {attr!r} in chain compound {chain_compound}"
-            raise DefinitionError(msg)
-
         lookup_node = sub_node
 
     return Reference(token_name, lookup_node)
@@ -173,7 +173,7 @@ class Chain:
         return cls("", [])
 
     @classmethod
-    def from_pattern(cls, pattern: str, **kwargs: AnyNode) -> Chain:
+    def from_pattern(cls, pattern: str, /, **kwargs: AnyNode) -> Chain:
         """Return a chain constructed from the given pattern.
 
         Raises:
@@ -189,7 +189,16 @@ class Chain:
             chain.append_separator(pattern[cursor:start])
 
             reference = _get_reference(kwargs, attr_name)
-            chain.append_reference(reference)
+            if isinstance(reference.target, ChainAlias):
+                # The alias stands for its references, through the node holding it
+                holder = attr_name.rpartition(".")[0]
+                alias_chain = reference.target.to_chain()
+                chain.append_chain(
+                    alias_chain.through_name(holder) if holder else alias_chain
+                )
+            else:
+                chain.append_reference(reference)
+
             cursor = end
 
         chain.append_separator(pattern[cursor:])
@@ -216,6 +225,13 @@ class Chain:
         """Append the given reference to the chain."""
         self._ref_seps.append(RefSep(reference, ""))
 
+    def append_chain(self, chain: Chain) -> None:
+        """Append the separators and references of the given chain to the chain."""
+        self.append_separator(chain.start_prefix)
+        for ref_sep in chain.iter_field_seps():
+            self.append_reference(ref_sep.reference)
+            self.append_separator(ref_sep.suffix)
+
     def append_separator(self, separator: str) -> None:
         """Add the string to the end of the chain."""
         if not self._ref_seps:
@@ -239,41 +255,49 @@ class Chain:
         """Return the regex associated to the chain."""
         return RegexBuilder().walk(self)
 
-    def format(self, value: dict[str, Any]) -> str:
+    def format(self, value: object) -> str:
         """Return the formatted string of this chain."""
         return self._prefix + "".join(
             f"{n.reference.format(value)}{n.suffix}" for n in self._ref_seps
         )
 
 
-class ChainCompound(Node[dict[str, Any], dict[str, Any]]):
-    """A reusable chain as a node to construct nested chains."""
+class ChainAlias(Token, Node[object, dict[str, Any]]):
+    """A chain standing for references through the node holding it.
+
+    A template does not reference an alias as a node: it splices the chain of the alias
+    where the alias is used, its references going through the node holding the alias.
+    For example, the templates declared on a model are aliases of the model node, as
+    they stand for references to the fields of the model. As a token, an alias stands
+    for references to the other tokens of the template.
+    """
 
     def __init__(self, chain: Chain) -> None:
-        """Initialize the chain compound node."""
+        """Initialize the alias of the given chain."""
         self._chain = chain
-        self._regex = self._chain.to_regex()
-        self._ref_by_name = {
-            ref_sep.reference.name: ref_sep.reference.target
-            for ref_sep in chain.iter_field_seps()
-        }
+
+    @override
+    def to_node(self, name: str) -> ChainAlias:
+        return self
 
     @override
     def to_regex(self) -> str:
-        return self._regex
+        return self._chain.to_regex()
 
     @override
-    def to_chain(self) -> Chain | None:
+    def to_chain(self) -> Chain:
         return self._chain
 
-    def get_node(self, name: str) -> AnyNode | None:
-        """Return the node with the given name."""
-        return self._ref_by_name.get(name)
+    @override
+    def get_nodes(self) -> Mapping[str, AnyNode]:
+        # The nodes of the chain are reached through the node holding the alias
+        return {}
 
     @override
-    def format_value(self, value: dict[str, Any]) -> str:
+    def format_value(self, value: object) -> str:
+        # The value of an alias is the value of the node holding it
         return self._chain.format(value)
 
     @override
-    def parse_value(self, raw: dict[str, Any]) -> dict[str, Any]:
+    def parse_value(self, raw: dict[str, Any]) -> object:
         return raw

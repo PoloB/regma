@@ -12,6 +12,8 @@ from typing import Generic
 from typing import TypeVar
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from regma.chain import Chain
 
 
@@ -38,8 +40,36 @@ class Node(abc.ABC, Generic[T_format, T_parse]):
     def parse_value(self, raw: T_parse) -> T_format:
         """Parse the given string and return the parsed value."""
 
+    def get_nodes(self) -> Mapping[str, AnyNode]:
+        """Return the nodes that dotted tokens reach through this node, by name.
+
+        By default, they are the nodes referenced by the chain of the node.
+        """
+        chain = self.to_chain()
+        if chain is None:
+            return {}
+
+        return {
+            ref_sep.reference.name: ref_sep.reference.target
+            for ref_sep in chain.iter_field_seps()
+        }
+
 
 AnyNode = Node[Any, Any]
+
+
+class Token(abc.ABC):
+    """Anything a template can use as a token, such as a field, a template or a model.
+
+    A template builds its chain from the nodes of its tokens: a dotted token reaches
+    the nodes of a node, and the regex builder expands the chain of a node having one.
+    A new kind of token only provides its node, either a leaf with a regex or a node
+    building its value from the nodes of its chain.
+    """
+
+    @abc.abstractmethod
+    def to_node(self, name: str) -> AnyNode:
+        """Return the node of this token in the chain of a template using it by name."""
 
 
 class Strictness(enum.Flag):

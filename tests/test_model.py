@@ -1,13 +1,17 @@
 """tests/test_model.py — TemplateModel, Field, parse/format/flatten."""
 
-import re
+from typing import Any
 
 import pytest
 
 from regma import DefinitionError
+from regma import FormatError
 from regma import Model
-from regma import ModelTemplate
 from regma import ParseError
+from regma import Template
+from regma import Token
+from regma import model_template
+from regma import reference
 from regma.field import integer
 from regma.field import string
 
@@ -17,9 +21,7 @@ class FooBarModel(Model):
 
     foo: str = string(r"[a-zA-Z0-9]+")
     bar: int = integer()
-
-
-foo_bar_template = ModelTemplate(FooBarModel, "{foo}_{bar}")
+    name = model_template("{foo}_{bar}")
 
 
 class ComplexModel(Model):
@@ -28,6 +30,29 @@ class ComplexModel(Model):
     foo_bar: FooBarModel
     foo: str = string(r"[a-zA-Z0-9]+")
     bar: int = integer()
+
+
+complex_template = Template(
+    "/root/{complex.foo_bar.foo}_{complex.foo_bar.bar}_{complex.foo}_{complex.bar}",
+    complex=ComplexModel,
+)
+
+
+class ProjectModel(Model):
+    """Model declaring templates."""
+
+    name: str = string(r"[a-z]+")
+    folder = model_template("/root/{name}")
+    label = model_template("project_{name}")
+
+
+class AssetModel(Model):
+    """Model declaring a template that uses the template of its sub-model."""
+
+    project: ProjectModel = reference(ProjectModel)
+    type: str = string(r"[a-z]+")
+    code: str = string(r"[a-z0-9]+")
+    folder = model_template("{project.folder}/{type}/{code}")
 
 
 def test_validate_simple_model_with_field() -> None:
@@ -42,14 +67,15 @@ def test_fields_are_extracted_correctly() -> None:
 
     class TestModel(Model):
         test: str = string(r"\w+")
+        template = model_template("{test}")
 
-    template = ModelTemplate(TestModel, "{test}")
+    template = TestModel.template
 
     assert len(TestModel.__typed_fields__) == 1
     assert "test" in TestModel.__typed_fields__
     assert template.chain.start_prefix == ""
     assert len(list(template.chain.iter_field_seps())) == 1
-    assert template.to_regex() == r"(?P<test>\w+)"
+    assert template.regex.pattern == r"(?P<test>\w+)"
 
 
 def test_sep_fields_are_extracted_correctly() -> None:
@@ -57,8 +83,9 @@ def test_sep_fields_are_extracted_correctly() -> None:
 
     class TestModel(Model):
         test: str = string(r"\w+")
+        template = model_template("sep{test}other")
 
-    template = ModelTemplate(TestModel, "sep{test}other")
+    template = TestModel.template
 
     assert len(TestModel.__typed_fields__) == 1
     assert "test" in TestModel.__typed_fields__
@@ -67,7 +94,7 @@ def test_sep_fields_are_extracted_correctly() -> None:
     assert len(field_seps) == 1
     assert field_seps[0].reference.name == "test"
     assert field_seps[0].suffix == "other"
-    assert template.to_regex() == r"sep(?P<test>\w+)other"
+    assert template.regex.pattern == r"sep(?P<test>\w+)other"
 
 
 def test_model_can_reference_field_multiple_times() -> None:
@@ -75,13 +102,14 @@ def test_model_can_reference_field_multiple_times() -> None:
 
     class TestModel(Model):
         test: str = string(r"\w+")
+        template = model_template("{test}/{test}")
 
-    template = ModelTemplate(TestModel, "{test}/{test}")
+    template = TestModel.template
 
     assert len(TestModel.__typed_fields__) == 1
     assert "test" in TestModel.__typed_fields__
     assert len(list(template.chain.iter_field_seps())) == 2  # noqa: PLR2004
-    assert template.to_regex() == r"(?P<test>\w+)/(?P=test)"
+    assert template.regex.pattern == r"(?P<test>\w+)/(?P=test)"
 
 
 def test_model_can_reference_other_models_through_model_field() -> None:
@@ -91,42 +119,126 @@ def test_model_can_reference_other_models_through_model_field() -> None:
         foo: str = string(r"[a-zA-Z0-9]+")
         bar: str = string(r"\w+")
 
-    first_template = ModelTemplate(FirstModel, "{foo}_{bar}")
-
     class SecondModel(Model):
         foo: str = string(r"[a-zA-Z0-9]+")
         bar: str = string(r"\w+")
         first: FirstModel
+        template = model_template(
+            "{foo}/{bar}/{first.foo}_{first.bar}/{first.foo}_{foo}_{bar}"
+        )
 
-    second_template = ModelTemplate(
-        SecondModel,
-        "{foo}/{bar}/{first_template}/{first.foo}_{foo}_{bar}_{first.bar}_{first_template}",
-        first_template=first_template.using("first"),
-    )
+    second_template = SecondModel.template
 
     assert len(SecondModel.__typed_fields__) == 2  # noqa: PLR2004
     assert len(SecondModel.__model_refs__) == 1
     assert (
-        second_template.to_regex() == r"(?P<foo>[a-zA-Z0-9]+)/(?P<bar>\w+)/"
-        r"(?P<first_template>(?P<first__foo>[a-zA-Z0-9]+)_(?P<first__bar>\w+))/"
-        r"(?P=first__foo)_(?P=foo)_(?P=bar)_(?P=first__bar)_(?P=first_template)"
+        second_template.regex.pattern == r"(?P<foo>[a-zA-Z0-9]+)/(?P<bar>\w+)/"
+        r"(?P<first__foo>[a-zA-Z0-9]+)_(?P<first__bar>\w+)/"
+        r"(?P=first__foo)_(?P=foo)_(?P=bar)"
     )
+    assert second_template.regex.match("foo/bar/ffoo_fbar/ffoo_foo_bar") is not None
+
+
+def test_model_can_reference_fields_of_nested_sub_models() -> None:
+    """Tokens shall reach the fields of the sub-models of a sub-model."""
+
+    class Leaf(Model):
+        value: int = integer()
+
+    class Middle(Model):
+        leaf: Leaf
+        name: str = string(r"[a-z]+")
+
+    class Root(Model):
+        middle: Middle
+        template = model_template("{middle.name}/{middle.leaf.value}")
+
+    template = Root.template
+    root = Root(Middle(Leaf(1), "foo"))
+
     assert (
-        re.match(
-            second_template.to_regex(), "foo/bar/ffoo_fbar/ffoo_foo_bar_fbar_ffoo_fbar"
-        )
-        is not None
+        template.regex.pattern
+        == r"(?P<middle__name>[a-z]+)/(?P<middle__leaf__value>\d+)"
     )
+    assert template.format(root) == "foo/1"
+    assert template.parse("foo/1") == {"middle": root.middle}
+
+
+def test_model_can_reference_model_declared_with_reference() -> None:
+    """Sub-models declared with reference shall provide tokens like annotated ones."""
+
+    class TestModel(Model):
+        foo_bar: FooBarModel = reference(FooBarModel)
+        template = model_template("{foo_bar.foo}_{foo_bar.bar}")
+
+    assert list(TestModel.__model_refs__) == ["foo_bar"]
+    assert TestModel.template.parse("foo_1") == {"foo_bar": FooBarModel("foo", 1)}
+
+
+def test_declared_template_accepts_field_named_like_template_arguments() -> None:
+    """A field name shall not collide with the arguments building the template."""
+
+    class SubModel(Model):
+        pattern: str = string(r"[a-z]+")
+
+    class TestModel(Model):
+        sub: SubModel
+        pattern: str = string(r"[a-z]+")
+        template = model_template("{pattern}_{sub.pattern}")
+
+    assert TestModel.template.parse("foo_bar") == {
+        "sub": SubModel("bar"),
+        "pattern": "foo",
+    }
+
+
+def test_model_is_a_token() -> None:
+    """A model shall be a token, its value being an instance of the model."""
+    template = Template("sep/{foo_bar.name}", foo_bar=FooBarModel)
+
+    assert isinstance(FooBarModel, Token)
+    assert template.parse("sep/foo_1") == {"foo_bar": FooBarModel("foo", 1)}
+    assert template.format({"foo_bar": FooBarModel("foo", 1)}) == "sep/foo_1"
+
+
+def test_model_node_has_no_pattern() -> None:
+    """The node of a model shall neither match nor format the model as a whole."""
+    node = FooBarModel.to_node("foo_bar")
+    message = r"\{foo_bar\} is the model FooBarModel, which has no pattern of its own"
+
+    assert node.to_chain() is None
+    with pytest.raises(DefinitionError, match=message):
+        node.to_regex()
+    with pytest.raises(DefinitionError, match=message):
+        node.format_value(FooBarModel("foo", 1))
+
+
+def test_declared_template_can_be_used_as_template_token() -> None:
+    """A declared template shall be usable wherever a template is."""
+    template = Template("sep/{foo_bar}", foo_bar=FooBarModel.name)
+
+    assert template.regex.pattern == (
+        r"sep/(?P<foo_bar>(?P<foo_bar__foo>[a-zA-Z0-9]+)_(?P<foo_bar__bar>\d+))"
+    )
+    assert template.parse("sep/foo_1") == {"foo_bar": {"foo": "foo", "bar": 1}}
+    assert template.format({"foo_bar": FooBarModel("foo", 1)}) == "sep/foo_1"
 
 
 def test_definition_fails_referencing_unknown_field() -> None:
     """Definition of model shall fail when referencing an unknown field."""
-
-    class TestModel(Model):
-        other: str = string(r"\w+")
-
     with pytest.raises(DefinitionError):
-        ModelTemplate(TestModel, "{test}")
+
+        class _TestModel(Model):
+            other: str = string(r"\w+")
+            template = model_template("{test}")
+
+
+def test_definition_fails_if_field_starts_with_underscore() -> None:
+    """Definition of model shall fail if the field starts with underscore."""
+    with pytest.raises(DefinitionError):
+
+        class _TestModel(Model):
+            _test: str = string(r"\w+")
 
 
 def test_definition_fails_if_field_ends_with_underscore() -> None:
@@ -149,35 +261,72 @@ def test_definition_fails_if_field_contain_double_underscore() -> None:
             foo__bar: str = string(r"\w+")
 
 
-def test_definition_fails_referencing_incorrectly_typed_field() -> None:
-    """Definition of model shall fail when referencing a field with the wrong type."""
+def test_definition_fails_if_attribute_shadows_token_method() -> None:
+    """No attribute shall hide the methods making the model a token."""
+    with pytest.raises(DefinitionError, match=r"\['mro', 'to_node'\]"):
+
+        class _ElementModel(Model):
+            to_node: str = string(r"[a-z]+")
+            mro: FooBarModel
+
+    with pytest.raises(DefinitionError, match=r"\['to_node'\]"):
+
+        class _MethodModel(Model):
+            name: str = string(r"[a-z]+")
+
+            def to_node(self) -> str:
+                return self.name
+
+
+def test_definition_fails_if_element_shadows_model_method() -> None:
+    """No field, sub-model or template shall shadow the methods of Model."""
+    with pytest.raises(
+        DefinitionError, match=r"\['from_dict', 'to_dict', 'to_flat_dict'\]"
+    ):
+
+        class _TestModel(Model):
+            to_dict: str = string(r"[a-z]+")  # type: ignore[assignment]  # ty: ignore[invalid-attribute-override]
+            to_flat_dict: FooBarModel  # type: ignore[assignment]  # ty: ignore[invalid-attribute-override]
+            from_dict = model_template("{to_dict}/{to_flat_dict.name}")  # type: ignore[assignment]  # ty: ignore[invalid-attribute-override]
+
+
+def test_model_methods_can_be_overridden() -> None:
+    """The methods of a model shall override the methods of Model."""
 
     class TestModel(Model):
-        test: str = "test"
+        name: str = string(r"[a-z]+")
 
+        def to_dict(self) -> dict[str, Any]:
+            return {**super().to_dict(), "upper": self.name.upper()}
+
+    assert TestModel("foo").to_dict() == {"name": "foo", "upper": "FOO"}
+
+
+def test_definition_fails_referencing_incorrectly_typed_field() -> None:
+    """Definition of model shall fail when referencing a field with the wrong type."""
     with pytest.raises(DefinitionError):
-        ModelTemplate(TestModel, "{test}")
+
+        class _TestModel(Model):
+            test: str = "test"
+            template = model_template("{test}")
 
 
 def test_definition_fails_with_missing_attribute() -> None:
     """Definition of model shall fail when referencing a missing attribute."""
-
-    class TestModel(Model):
-        pass
-
     with pytest.raises(DefinitionError):
-        ModelTemplate(TestModel, "{.}")
+
+        class _TestModel(Model):
+            template = model_template("{.}")
 
 
 def test_definition_fails_with_missing_model_field() -> None:
     """Definition oif model fails if all the fields are not used in the template."""
+    with pytest.raises(DefinitionError, match=r"\['bar'\]"):
 
-    class TestModel(Model):
-        foo: str = string(r"[a-zA-Z0-9]+")
-        bar: str = string(r"\w+")
-
-    with pytest.raises(DefinitionError):
-        ModelTemplate(TestModel, "{foo}")
+        class _TestModel(Model):
+            foo: str = string(r"[a-zA-Z0-9]+")
+            bar: str = string(r"\w+")
+            template = model_template("{foo}")
 
 
 def test_definition_fails_with_missing_sub_model_field() -> None:
@@ -187,35 +336,36 @@ def test_definition_fails_with_missing_sub_model_field() -> None:
         foo: str = string(r"[a-zA-Z0-9]+")
         bar: str = string(r"\w+")
 
-    class SecondModel(Model):
-        foo: str = string(r"[a-zA-Z0-9]+")
-        bar: str = string(r"\w+")
-        first: FirstModel
+    with pytest.raises(DefinitionError, match=r"\['first\.bar'\]"):
 
+        class _SecondModel(Model):
+            foo: str = string(r"[a-zA-Z0-9]+")
+            bar: str = string(r"\w+")
+            first: FirstModel
+            template = model_template("{foo}/{bar}/{first.foo}")  # first.bar missing
+
+
+def test_definition_fails_referencing_unknown_sub_model_field() -> None:
+    """Definition of model fails if a token targets an unknown sub-model field."""
     with pytest.raises(DefinitionError):
-        ModelTemplate(SecondModel, "{foo}/{bar}/{first.foo}")  # first.bar is missing
+        Template(
+            "/root/{complex.foo_bar.foo}_{complex.foo_bar.nope}_{complex.foo}",
+            complex=ComplexModel,
+        )  # foo_bar.nope is invalid
 
 
-def test_definition_fails_with_template_misuse() -> None:
-    """Definition of model fails if a template is not properly referenced."""
+def test_definition_fails_referencing_whole_sub_model() -> None:
+    """Definition of model fails if a token targets a sub-model and not its fields.
 
-    class FirstModel(Model):
-        foo: str = string(r"[a-zA-Z0-9]+")
-        bar: str = string(r"\w+")
+    A model has no pattern of its own so there is no way to build the regex of such
+    token.
+    """
+    with pytest.raises(DefinitionError, match=r"\{foo_bar\} is the model FooBarModel"):
 
-    first_template = ModelTemplate(FirstModel, "{foo}_{bar}")
-
-    class SecondModel(Model):
-        foo: str = string(r"[a-zA-Z0-9]+")
-        bar: str = string(r"\w+")
-        first: FirstModel
-
-    with pytest.raises(DefinitionError):
-        ModelTemplate(
-            SecondModel,
-            "{foo}/{bar}/{first_template.nope}",
-            first_template=first_template,
-        )  # first.template.nope is invalid
+        class _TestModel(Model):
+            foo_bar: FooBarModel
+            foo: str = string(r"[a-zA-Z0-9]+")
+            template = model_template("/root/{foo_bar}_{foo}")
 
 
 def test_model_is_instantiated_correctly() -> None:
@@ -264,21 +414,54 @@ def test_model_is_instantiable_with_kwargs() -> None:
 def test_model_instantiation_fails_if_missing_arguments() -> None:
     """Models instantiation shall raise TypeError if missing arguments."""
     with pytest.raises(TypeError):
-        FooBarModel("test")  # type: ignore[call-arg]
+        FooBarModel("test")  # type: ignore[call-arg]  # ty: ignore[missing-argument]
 
 
 def test_model_instantiation_fails_if_too_many_arguments() -> None:
     """Models instantiation shall raise TypeError if there are too many arguments."""
     with pytest.raises(TypeError):
-        FooBarModel("test", 1, "excess")  # type: ignore[call-arg]
+        FooBarModel("test", 1, "excess")  # type: ignore[call-arg]  # ty: ignore[too-many-positional-arguments]
 
     with pytest.raises(TypeError):
-        FooBarModel("test", 1, foo="foo")  # type: ignore[misc]
+        FooBarModel("test", 1, foo="foo")  # type: ignore[misc]  # ty: ignore[parameter-already-assigned]
+
+
+def test_model_from_dict() -> None:
+    """Models shall be initializable from a dict nesting the data of sub-models."""
+    data = {"foo": "foo", "bar": 1, "foo_bar": {"foo": "foo", "bar": 2}}
+    inst = ComplexModel.from_dict(data)
+    assert inst == ComplexModel(FooBarModel("foo", 2), "foo", 1)
+
+
+def test_model_from_dict_excess() -> None:
+    """Models shall still initialize if there are too many keys."""
+    data = {
+        "foo": "foo",
+        "bar": 1,
+        "foo_bar": {"foo": "foo", "bar": 2, "unknown": 42},
+        "unknown": 42,
+    }
+    inst = ComplexModel.from_dict(data)
+    assert inst == ComplexModel(FooBarModel("foo", 2), "foo", 1)
+
+
+def test_model_from_dict_parses_values() -> None:
+    """Models shall parse and validate the values of the dict with their fields."""
+    assert FooBarModel.from_dict({"foo": "foo", "bar": "1"}) == FooBarModel("foo", 1)
+    with pytest.raises(ParseError):
+        FooBarModel.from_dict({"foo": "foo", "bar": "one"})
+
+
+def test_model_from_dict_fail_with_missing_key() -> None:
+    """Models shall raise TypeError if missing key."""
+    data = {"foo": "foo", "bar": 1, "foo_bar": {"foo": "foo"}}
+    with pytest.raises(TypeError):
+        ComplexModel.from_dict(data)
 
 
 def test_model_from_flat_dict() -> None:
-    """Models shall be initializable from a flat dict."""
-    data = {"foo": "foo", "bar": 1, "foo_bar__foo": "foo", "foo_bar__bar": 2}
+    """Models shall be initializable from a flat dict keyed by dotted paths."""
+    data = {"foo": "foo", "bar": 1, "foo_bar.foo": "foo", "foo_bar.bar": 2}
     inst = ComplexModel.from_flat_dict(data)
     assert inst == ComplexModel(FooBarModel("foo", 2), "foo", 1)
 
@@ -288,9 +471,10 @@ def test_model_from_flat_dict_excess() -> None:
     data = {
         "foo": "foo",
         "bar": 1,
-        "foo_bar__foo": "foo",
-        "foo_bar__bar": 2,
+        "foo_bar.foo": "foo",
+        "foo_bar.bar": 2,
         "unknown": 42,
+        "unknown.foo": 42,
     }
     inst = ComplexModel.from_flat_dict(data)
     assert inst == ComplexModel(FooBarModel("foo", 2), "foo", 1)
@@ -302,9 +486,8 @@ def test_model_from_flat_dict_with_unflattened_sub_model() -> None:
         "foo": "foo",
         "bar": 1,
         "foo_bar": "foo_2",
-        "foo_bar__foo": "foo",
-        "foo_bar__bar": 2,
-        "unknown": 42,
+        "foo_bar.foo": "foo",
+        "foo_bar.bar": 2,
     }
     inst = ComplexModel.from_flat_dict(data)
     assert inst == ComplexModel(FooBarModel("foo", 2), "foo", 1)
@@ -312,14 +495,43 @@ def test_model_from_flat_dict_with_unflattened_sub_model() -> None:
 
 def test_model_from_flat_dict_fail_with_missing_key() -> None:
     """Models shall raise TypeError if missing key."""
-    data = {"foo": "foo", "bar": 1, "foo_bar__foo": "foo"}
+    data = {"foo": "foo", "bar": 1, "foo_bar.foo": "foo"}
     with pytest.raises(TypeError):
         ComplexModel.from_flat_dict(data)
 
 
+def test_model_to_dict() -> None:
+    """Models shall convert to a dict nesting the data of sub-models."""
+    inst = ComplexModel(FooBarModel("foo", 2), "foo", 1)
+    data = inst.to_dict()
+
+    assert data == {"foo_bar": {"foo": "foo", "bar": 2}, "foo": "foo", "bar": 1}
+    assert ComplexModel.from_dict(data) == inst
+
+
+def test_model_to_flat_dict() -> None:
+    """Models shall convert to a flat dict keyed by dotted paths, at any depth."""
+
+    class ShotModel(Model):
+        asset: AssetModel
+        number: int = integer()
+
+    shot = ShotModel(AssetModel(ProjectModel("foo"), "chr", "bar"), 10)
+    data = shot.to_flat_dict()
+
+    assert data == {
+        "asset.project.name": "foo",
+        "asset.type": "chr",
+        "asset.code": "bar",
+        "number": 10,
+    }
+    assert ShotModel.from_flat_dict(data) == shot
+
+
 def test_model_parse() -> None:
     """Models shall parse successfully."""
-    inst = complex_template.parse("/root/foo_2_foo_1")
+    inst = complex_template.parse("/root/foo_2_foo_1")["complex"]
+    assert isinstance(inst, ComplexModel)
     assert inst == ComplexModel(FooBarModel("foo", 2), "foo", 1)
 
 
@@ -329,6 +541,180 @@ def test_model_parse_fail_raises_parse_error() -> None:
         complex_template.parse("/nope/foo_2foo_1")
 
 
+def test_model_parse_validates_what_regex_cannot_express() -> None:
+    """Models shall raise ParseError if a value matches the regex but is not valid."""
+
+    class TestModel(Model):
+        value: int = integer(maximum=5)
+        template = model_template("{value}")
+
+    assert TestModel.template.parse("5") == {"value": 5}
+    with pytest.raises(ParseError):
+        TestModel.template.parse("6")
+
+
+def test_model_parse_with_repeated_token() -> None:
+    """Repeated tokens shall hold the same value when parsing."""
+
+    class TestModel(Model):
+        test: str = string(r"\w+")
+        template = model_template("{test}/{test}")
+
+    assert TestModel.template.parse("foo/foo") == {"test": "foo"}
+    with pytest.raises(ParseError):
+        TestModel.template.parse("foo/bar")
+
+
+def test_model_format() -> None:
+    """Model templates shall format model instances, as the inverse of parse."""
+    inst = ComplexModel(FooBarModel("foo", 2), "foo", 1)
+    formatted = complex_template.format({"complex": inst})
+
+    assert formatted == "/root/foo_2_foo_1"
+    assert complex_template.parse(formatted) == {"complex": inst}
+
+
+def test_model_format_fail_raises_format_error() -> None:
+    """Model templates shall raise FormatError if a value is not valid."""
+
+    class TestModel(Model):
+        value: int = integer(maximum=5)
+        template = model_template("{value}")
+
+    with pytest.raises(FormatError):
+        TestModel.template.format(TestModel(6))
+
+
 def test_model_repr() -> None:
     """Models shall return a string when using repr."""
     assert isinstance(repr(ComplexModel(FooBarModel("foo", 2), "foo", 1)), str)
+
+
+def test_declared_template_works_on_its_model() -> None:
+    """A template declared in a model shall parse and format the fields of the model."""
+    assert ProjectModel.folder.parse("/root/foo") == {"name": "foo"}
+    assert ProjectModel.folder.format(ProjectModel("foo")) == "/root/foo"
+    assert ProjectModel.folder.format({"name": "foo"}) == "/root/foo"
+    assert ProjectModel.folder.pattern == "/root/{name}"
+
+
+def test_declared_template_is_reachable_from_instances() -> None:
+    """A template declared in a model shall be reachable from the model instances."""
+    assert ProjectModel("foo").folder is ProjectModel.folder
+
+
+def test_declared_template_can_use_template_of_sub_model() -> None:
+    """A declared template shall be usable in the templates of other models."""
+    asset = AssetModel(ProjectModel("foo"), "chr", "bar")
+
+    assert AssetModel.folder.pattern == "{project.folder}/{type}/{code}"
+    assert AssetModel.folder.regex.pattern == (
+        r"/root/(?P<project__name>[a-z]+)/(?P<type>[a-z]+)/(?P<code>[a-z0-9]+)"
+    )
+    assert AssetModel.folder.format(asset) == "/root/foo/chr/bar"
+    assert AssetModel(**AssetModel.folder.parse("/root/foo/chr/bar")) == asset
+
+
+def test_declared_template_can_use_template_of_nested_sub_model() -> None:
+    """Declared templates shall be usable through several levels of sub-models."""
+
+    class ShotModel(Model):
+        asset: AssetModel
+        number: int = integer(padding=3)
+        file = model_template("{asset.folder}/{number}.ma")
+        cache = model_template(
+            "{asset.project.folder}/cache/{asset.type}_{asset.code}_{number}"
+        )
+
+    shot = ShotModel(AssetModel(ProjectModel("foo"), "chr", "bar"), 12)
+
+    assert ShotModel.file.format(shot) == "/root/foo/chr/bar/012.ma"
+    assert ShotModel(**ShotModel.file.parse("/root/foo/chr/bar/012.ma")) == shot
+    assert ShotModel.cache.format(shot) == "/root/foo/cache/chr_bar_012"
+    assert ShotModel(**ShotModel.cache.parse("/root/foo/cache/chr_bar_012")) == shot
+
+
+def test_declared_templates_of_sub_model_share_its_fields() -> None:
+    """Fields reached through several templates of a sub-model shall hold one value."""
+    template = Template(
+        "{asset.project.folder}/{asset.type}/{asset.code}/{asset.project.label}",
+        asset=AssetModel,
+    )
+
+    assert template.parse("/root/foo/chr/bar/project_foo") == {
+        "asset": AssetModel(ProjectModel("foo"), "chr", "bar")
+    }
+    with pytest.raises(ParseError):
+        template.parse("/root/foo/chr/bar/project_baz")
+
+
+def test_template_can_use_template_declared_on_model_token() -> None:
+    """A template shall be able to use the templates declared on a model token."""
+    template = Template("{asset.folder}/data.json", asset=AssetModel)
+    asset = AssetModel(ProjectModel("foo"), "chr", "bar")
+
+    assert template.format({"asset": asset}) == "/root/foo/chr/bar/data.json"
+    assert template.parse("/root/foo/chr/bar/data.json") == {"asset": asset}
+
+
+def test_declared_template_can_only_use_templates_declared_before_it() -> None:
+    """Declared templates shall be bound in declaration order."""
+
+    class TestModel(Model):
+        name: str = string(r"[a-z]+")
+        folder = model_template("/root/{name}")
+        file = model_template("{folder}/data.json")
+
+    assert TestModel.file.parse("/root/foo/data.json") == {"name": "foo"}
+
+    with pytest.raises(DefinitionError, match=r"_TestModel\.first"):
+
+        class _TestModel(Model):
+            name: str = string(r"[a-z]+")
+            first = model_template("{second}/data.json")
+            second = model_template("/root/{name}")
+
+
+def test_declared_template_fails_at_model_definition() -> None:
+    """An invalid declared template shall fail when its model is defined."""
+    with pytest.raises(DefinitionError, match=r"_TestModel\.folder"):
+
+        class _TestModel(Model):
+            name: str = string(r"[a-z]+")
+            folder = model_template("/root/{nope}")
+
+
+def test_template_fails_referencing_unknown_element_of_sub_model() -> None:
+    """A token targeting neither a field nor a template of a sub-model shall fail."""
+    with pytest.raises(DefinitionError):
+        Template("{asset.project.nope}/{asset.type}/{asset.code}", asset=AssetModel)
+
+
+def test_model_inherits_fields_and_declared_templates() -> None:
+    """Sub-classes shall inherit the fields and declared templates of their model."""
+
+    class SpecialAsset(AssetModel):
+        pass
+
+    template = Template("{asset.folder}", asset=SpecialAsset)
+    asset = template.parse("/root/foo/chr/bar")["asset"]
+
+    assert list(SpecialAsset.__fields__) == ["project", "type", "code"]
+    assert SpecialAsset.folder is not AssetModel.folder
+    assert type(asset) is SpecialAsset
+    assert asset == SpecialAsset(ProjectModel("foo"), "chr", "bar")
+
+
+def test_inherited_template_shall_reference_new_fields() -> None:
+    """A sub-class adding fields shall redeclare the templates it inherits."""
+    with pytest.raises(DefinitionError, match=r"_VersionedProject\.folder"):
+
+        class _VersionedProject(ProjectModel):
+            version: int = integer()
+
+    class VersionedProject(ProjectModel):
+        version: int = integer()
+        folder = model_template("/root/{name}/v{version}")
+        label = model_template("project_{name}_v{version}")
+
+    assert VersionedProject.folder.parse("/root/foo/v1") == {"name": "foo", "version": 1}
