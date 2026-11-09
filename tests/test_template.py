@@ -9,10 +9,10 @@ from typing import Any
 import pytest
 from typing_extensions import override
 
+from regma import Compound
 from regma import DefinitionError
 from regma import FormatError
 from regma import Model
-from regma import Node
 from regma import ParseError
 from regma import Template
 from regma import Token
@@ -25,7 +25,7 @@ from regma.field import IntField
 from regma.field import StrField
 
 if TYPE_CHECKING:
-    from regma.core import AnyNode
+    from collections.abc import Mapping
 
 
 class AssetModel(Model):
@@ -150,6 +150,21 @@ def test_template_reaches_tokens_of_template_token() -> None:
     assert template.parse("a_b/b") == {"t": {"a": "a", "b": "b"}}
 
 
+def test_template_reaches_fields_of_models_of_template_token() -> None:
+    """Dotted tokens shall reach the fields of the models used by a template token."""
+    template = Template(
+        "{t}/{t.asset.type}", t=Template("{asset.name}", asset=AssetModel)
+    )
+    value = {"t": {"asset": AssetModel("chr", "toto")}}
+
+    assert template.regex.pattern == (
+        r"(?P<t>(?P<t__asset__type>[a-z]+)_(?P<t__asset__code>[a-z]+))"
+        r"/(?P=t__asset__type)"
+    )
+    assert template.parse("chr_toto/chr") == value
+    assert template.format(value) == "chr_toto/chr"
+
+
 def test_template_model_token_reaches_fields() -> None:
     """A model token shall reach the fields of the model through dotted tokens."""
     template = Template("{asset.type}/{asset.code}", asset=AssetModel)
@@ -223,11 +238,11 @@ def test_template_validates_model_values() -> None:
 
 def test_template_fails_referencing_whole_model() -> None:
     """A model has no pattern of its own, so a token cannot be the whole model."""
-    with pytest.raises(DefinitionError, match=r"\{asset\} is the model AssetModel"):
+    with pytest.raises(DefinitionError, match=r"\{asset\}: .* no pattern of its own"):
         Template("{asset}", asset=AssetModel)
 
     with pytest.raises(
-        DefinitionError, match=r"\{variant\.asset\} is the model AssetModel"
+        DefinitionError, match=r"\{variant\.asset\}: .* no pattern of its own"
     ):
         Template("{variant.asset}/{variant.code}", variant=VariantModel)
 
@@ -246,49 +261,39 @@ def test_template_fails_referencing_unknown_element_of_model() -> None:
     with pytest.raises(DefinitionError):
         Template("{variant.nope.name}", variant=VariantModel)
 
-    # A declared template stands for references to the fields of its model
-    with pytest.raises(DefinitionError, match=r"'asset\.name' has no 'type'"):
+    # A declared template is an alias, standing for references to the fields
+    with pytest.raises(DefinitionError, match=r"'asset\.name' is not a token"):
         Template("{asset.name.type}", asset=AssetModel)
 
 
-class _DateNode(Node[datetime.date, dict[str, Any]]):
-    """Node of a date written as year-month-day, reaching its numbers."""
+class _DateToken(Compound[datetime.date]):
+    """A date written as year-month-day, reaching its numbers."""
 
     def __init__(self) -> None:
-        """Initialize the node from the padded numbers of the date."""
-        nodes = {
-            name: IntField(padding=padding).to_node(name)
+        """Initialize the token from the padded numbers of the date."""
+        self._tokens = {
+            name: IntField(padding=padding)
             for name, padding in (("year", 4), ("month", 2), ("day", 2))
         }
-        self._chain = Chain.from_pattern("{year}-{month}-{day}", **nodes)
+        self._chain = Chain.from_pattern("{year}-{month}-{day}", **self._tokens)
 
+    @property
     @override
-    def to_regex(self) -> str:
-        return self._chain.to_regex()
+    def tokens(self) -> Mapping[str, Token[Any]]:
+        return self._tokens
 
+    @property
     @override
-    def to_chain(self) -> Chain:
+    def chain(self) -> Chain:
         return self._chain
 
     @override
-    def format_value(self, value: datetime.date) -> str:
-        return self._chain.format(value)
-
-    @override
-    def parse_value(self, raw: dict[str, Any]) -> datetime.date:
-        return datetime.date(int(raw["year"]), int(raw["month"]), int(raw["day"]))
-
-
-class _DateToken(Token):
-    """A date as a token."""
-
-    @override
-    def to_node(self, name: str) -> AnyNode:
-        return _DateNode()
+    def build_value(self, values: dict[str, Any]) -> datetime.date:
+        return datetime.date(**values)
 
 
 def test_template_accepts_new_kinds_of_tokens() -> None:
-    """A template shall use any token through its node, expanding its chain."""
+    """A template shall use any compound, expanding its chain."""
     template = Template(
         "{shot}_{date}/{date.year}", shot=string("[a-z]+"), date=_DateToken()
     )
@@ -302,3 +307,67 @@ def test_template_accepts_new_kinds_of_tokens() -> None:
     assert template.parse("foo_2024-05-01/2024") == value
     with pytest.raises(ParseError):
         template.parse("foo_2024-05-01/2025")
+
+
+class _FramesToken(Compound[range]):
+    """Frames written first-last, as a range not holding its numbers by attribute."""
+
+    def __init__(self) -> None:
+        """Initialize the token from the first and last frames."""
+        self._tokens = {"first": IntField(), "last": IntField()}
+        self._chain = Chain.from_pattern("{first}-{last}", **self._tokens)
+
+    @property
+    @override
+    def tokens(self) -> Mapping[str, Token[Any]]:
+        return self._tokens
+
+    @property
+    @override
+    def chain(self) -> Chain:
+        return self._chain
+
+    @override
+    def build_value(self, values: dict[str, Any]) -> range:
+        return range(values["first"], values["last"] + 1)
+
+    @override
+    def get_value(self, value: range, name: str) -> object:
+        return value[0] if name == "first" else value[-1]
+
+
+def test_template_gets_values_of_tokens_from_compound() -> None:
+    """A compound shall give the values of its tokens from its own value."""
+    template = Template(
+        "{shot}.{frames}/{frames.last}", shot=string("[a-z0-9]+"), frames=_FramesToken()
+    )
+    value = {"shot": "sh010", "frames": range(1001, 1101)}
+
+    assert template.format(value) == "sh010.1001-1100/1100"
+    assert template.parse("sh010.1001-1100/1100") == value
+
+
+class _UpperToken(Token[str]):
+    """A word written in upper case, which is a token without being a field."""
+
+    @override
+    def to_regex(self) -> str:
+        return "[A-Z]+"
+
+    @override
+    def parse_value(self, raw: str) -> str:
+        return raw.lower()
+
+    @override
+    def format_value(self, value: str) -> str:
+        return value.upper()
+
+
+def test_template_accepts_any_token() -> None:
+    """A template shall use any token, matching its regex if it has no chain."""
+    template = Template("{shot}_{date}", shot=_UpperToken(), date=_DateToken())
+    value = {"shot": "foo", "date": datetime.date(2024, 5, 1)}
+
+    assert template.regex.pattern.startswith(r"(?P<shot>[A-Z]+)_(?P<date>")
+    assert template.format(value) == "FOO_2024-05-01"
+    assert template.parse("FOO_2024-05-01") == value

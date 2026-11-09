@@ -15,7 +15,6 @@ from regma import string
 from regma.core import Strictness
 from regma.error import ValidationError
 from regma.field import AbstractField
-from regma.field import BoundField
 from regma.field import ChoiceField
 from regma.field import CustomField
 from regma.field import IntField
@@ -130,39 +129,6 @@ def test_abstract_field_format_value_fails_if_value_is_unformattable() -> None:
     """Formatting an invalid value shall success if not strict."""
     with pytest.raises(FormatError):
         AbstractTestField(Strictness.NONE).format_value("unformattable")
-
-
-def test_bound_field_init() -> None:
-    """Bound field init behaves as expected."""
-    field = StrField(r"\w+")
-    bound_field = BoundField("attr", field)
-    assert bound_field.name == "attr"
-    assert bound_field.field is field
-
-
-def test_bound_field_chain() -> None:
-    """Bound field init behaves as expected."""
-    field = StrField(r"\w+")
-    bound_field = BoundField("attr", field)
-    assert bound_field.to_chain() is None
-
-
-def test_bound_field_regex() -> None:
-    """Bound field regex behaves as expected."""
-    bound_field = BoundField("attr", StrField(r"\w+"))
-    assert bound_field.to_regex() == r"\w+"
-
-
-def test_bound_field_format() -> None:
-    """Bound field format behaves as expected."""
-    bound_field = BoundField("test", StrField(r"\w+"))
-    assert bound_field.format_value("test") == "test"
-
-
-def test_bound_field_parse() -> None:
-    """Bound field parse behaves as expected."""
-    bound_field = BoundField("test", StrField(r"\w+"))
-    assert bound_field.parse_value("test") == "test"
 
 
 def test_str_field_pattern_init() -> None:

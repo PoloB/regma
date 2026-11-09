@@ -5,12 +5,10 @@ from __future__ import annotations
 import abc
 import re
 from typing import Any
-from typing import Generic
 from typing import TypeVar
 
 from typing_extensions import override
 
-from regma.core import Node
 from regma.core import Strictness
 from regma.core import Token
 from regma.error import DefinitionError
@@ -21,7 +19,7 @@ from regma.error import ValidationError
 T_field = TypeVar("T_field", bound=Any)
 
 
-class AbstractField(Token, Generic[T_field]):
+class AbstractField(Token[T_field]):
     """Abstract base for all atomic fields, which templates can use as tokens."""
 
     def __init__(self, strictness: Strictness = Strictness.ALL) -> None:
@@ -34,14 +32,6 @@ class AbstractField(Token, Generic[T_field]):
     def strictness(self) -> Strictness:
         """Return the strictness of the field."""
         return self._strictness
-
-    @override
-    def to_node(self, name: str) -> BoundField[T_field]:
-        return BoundField(name, self)
-
-    @abc.abstractmethod
-    def to_regex(self) -> str:
-        """Return the regex for this field."""
 
     @abc.abstractmethod
     def get_supported_types(self) -> tuple[type[T_field]]:
@@ -59,6 +49,7 @@ class AbstractField(Token, Generic[T_field]):
     def _format_value(self, value: T_field) -> str:
         """Return the formatted value for the given string."""
 
+    @override
     def parse_value(self, raw: str) -> T_field:
         """Parse the value, handling validation."""
         try:
@@ -74,6 +65,7 @@ class AbstractField(Token, Generic[T_field]):
 
         return value
 
+    @override
     def format_value(self, value: T_field) -> str:
         """Format the value to string, handling validation."""
         if self._strict_format:
@@ -86,52 +78,6 @@ class AbstractField(Token, Generic[T_field]):
             return self._format_value(value)
         except Exception as e:
             raise FormatError from e
-
-
-class BoundField(Node[T_field, str], Generic[T_field]):
-    """A field bound to a template model through an attribute."""
-
-    def __init__(self, name: str, field: AbstractField[T_field]) -> None:
-        """Initialize the bound field.
-
-        The name is the name of the attribute the field is bound to.
-
-        For example, in the following template model:
-
-        class ExampleModel(TemplateModel):
-            __template__ = "{test}"
-            test: str = StrField(".+")
-
-        The name is 'test' and the field is StrField(".+")
-        """
-        self._name = name
-        self._field = field
-
-    @property
-    def name(self) -> str:
-        """Return the name of the bound field."""
-        return self._name
-
-    @property
-    def field(self) -> AbstractField[T_field]:
-        """Return the bound field."""
-        return self._field
-
-    @override
-    def to_regex(self) -> str:
-        return self._field.to_regex()
-
-    @override
-    def format_value(self, value: T_field) -> str:
-        return self._field.format_value(value)
-
-    @override
-    def parse_value(self, raw: str) -> T_field:
-        return self._field.parse_value(raw)
-
-    @override
-    def to_chain(self) -> None:
-        return None
 
 
 class PatternField(AbstractField[T_field], abc.ABC):

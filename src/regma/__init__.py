@@ -4,7 +4,7 @@ from regma import TemplateModel, Field, Slot
 from regma.fields import StrField, IntField, ChoiceField
 """
 
-from regma.core import Node
+from regma.core import Compound
 from regma.core import Token
 from regma.error import DefinitionError
 from regma.error import FormatError
@@ -20,10 +20,10 @@ from regma.model import reference
 from regma.template import Template
 
 __all__ = [
+    "Compound",
     "DefinitionError",
     "FormatError",
     "Model",
-    "Node",
     "ParseError",
     "RegmaError",
     "Template",

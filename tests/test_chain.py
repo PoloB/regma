@@ -2,34 +2,45 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
+from regma import Model
+from regma import model_template
+from regma import string
 from regma.chain import Chain
-from regma.chain import ChainAlias
+from regma.chain import Delimiter
 from regma.chain import Reference
 from regma.chain import RefSep
+from regma.core import ChainAlias
 from regma.error import DefinitionError
-from regma.field import BoundField
 from regma.field import StrField
 from regma.template import Template
 
 
 @pytest.fixture
-def bound_field() -> BoundField[str]:
-    """Return bound field used for reference testing."""
-    return BoundField("test", StrField(".+"))
+def field() -> StrField:
+    """Return field used for reference testing."""
+    return StrField(".+")
 
 
 @pytest.fixture
-def reference(bound_field: BoundField[str]) -> Reference:
-    """Return bound field used for reference testing."""
-    return Reference("reference", bound_field)
+def reference(field: StrField) -> Reference:
+    """Return reference used for testing."""
+    return Reference("reference", field)
 
 
-def test_reference_init(bound_field: BoundField[str]) -> None:
+@pytest.fixture
+def holder() -> Template:
+    """Return the template holding the token of the reference."""
+    return Template("{reference}", reference=StrField(".+"))
+
+
+def test_reference_init(field: StrField) -> None:
     """Test the reference object initialize properly."""
-    reference = Reference("other", bound_field)
-    assert reference.target is bound_field
+    reference = Reference("other", field)
+    assert reference.target is field
     assert reference.name == "other"
 
 
@@ -38,9 +49,21 @@ def test_reference_regex(reference: Reference) -> None:
     assert reference.to_regex() == ".+"
 
 
-def test_reference_format(reference: Reference) -> None:
+def test_reference_to_compound_regex() -> None:
+    """A reference to a compound shall return the regex of its chain."""
+    template = Template("{a}_{b}", a=StrField(r"a"), b=StrField(r"b"))
+    assert Reference("t", template).to_regex() == r"(?P<a>a)_(?P<b>b)"
+
+
+def test_reference_to_compound_without_chain_fails() -> None:
+    """A compound without chain shall have no regex, naming its reference."""
+    with pytest.raises(DefinitionError, match=r"\{t\}: the compound has no pattern"):
+        Reference("t", _AliasModel.__token__).to_regex()
+
+
+def test_reference_format(reference: Reference, holder: Template) -> None:
     """Reference shall return expected format."""
-    assert reference.format({"reference": "value"}) == "value"
+    assert reference.format({"reference": "value"}, holder) == "value"
 
 
 def test_ref_sep_init(reference: Reference) -> None:
@@ -69,23 +92,6 @@ def chain(ref_sep: RefSep) -> Chain:
     return Chain("start", [ref_sep])
 
 
-def test_chain_alias_init(chain: Chain) -> None:
-    """Test the chain alias init."""
-    alias = ChainAlias(chain)
-    assert alias.to_chain() is chain
-
-
-@pytest.fixture
-def alias(chain: Chain) -> ChainAlias:
-    """Return a chain alias object for testing."""
-    return ChainAlias(chain)
-
-
-def test_chain_alias_regex(alias: ChainAlias) -> None:
-    """Test the regex of chain alias."""
-    assert alias.to_regex() == r"start(?P<reference>.+)end"
-
-
 def test_chain_regex(chain: Chain) -> None:
     """Chain shall return expected regex."""
     assert chain.to_regex() == r"start(?P<reference>.+)end"
@@ -98,15 +104,15 @@ def test_chain_use_back_reference(reference: Reference) -> None:
 
 
 @pytest.fixture
-def nested_chain() -> Chain:
-    """Return a chain nesting the chain of a template node for testing."""
-    template = Template(
-        "{field1}_{field2}", field1=StrField(r".+"), field2=StrField(r"\w+")
-    )
+def inner_template() -> Template:
+    """Return a template used as a token of the nested chain."""
+    return Template("{field1}_{field2}", field1=StrField(r".+"), field2=StrField(r"\w+"))
 
-    return Chain.from_pattern(
-        "{chain1.field1}_{chain1}/{chain1}", chain1=template.to_node("chain1")
-    )
+
+@pytest.fixture
+def nested_chain(inner_template: Template) -> Chain:
+    """Return a chain nesting the chain of a template for testing."""
+    return Chain.from_pattern("{chain1.field1}_{chain1}/{chain1}", chain1=inner_template)
 
 
 def test_chain_use_back_reference_on_nested_nodes(nested_chain: Chain) -> None:
@@ -118,47 +124,63 @@ def test_chain_use_back_reference_on_nested_nodes(nested_chain: Chain) -> None:
     )
 
 
-def test_chain_from_pattern_fails_with_no_attribute(
-    bound_field: BoundField[str],
-) -> None:
+def test_chain_from_pattern_fails_with_no_attribute(field: StrField) -> None:
     """Test building a chain from pattern fails with no attribute."""
     with pytest.raises(DefinitionError):
         Chain.from_pattern("{}")
 
     with pytest.raises(DefinitionError):
-        Chain.from_pattern("{field.}", field=bound_field)
+        Chain.from_pattern("{field.}", field=field)
 
 
-def test_chain_from_pattern_fails_with_missing_attribute(
-    bound_field: BoundField[str],
-) -> None:
+def test_chain_from_pattern_fails_with_missing_attribute(field: StrField) -> None:
     """Test building a chain from pattern fails with missing attribute."""
-    with pytest.raises(DefinitionError):
-        Chain.from_pattern("{missing}", field=bound_field)
+    with pytest.raises(DefinitionError, match="'missing': neither a token nor an alias"):
+        Chain.from_pattern("{missing}", field=field)
 
 
-def test_chain_from_pattern_fails_with_invalid_attribute(
-    bound_field: BoundField[str],
-) -> None:
+def test_chain_from_pattern_fails_with_invalid_attribute(field: StrField) -> None:
     """Test building a chain from pattern fails with invalid attribute."""
     with pytest.raises(DefinitionError):
-        Chain.from_pattern("{field.test}", field=bound_field)
+        Chain.from_pattern("{field.test}", field=field)
 
 
-def test_chain_fails_on_missing_nested_node() -> None:
+def test_chain_fails_on_missing_nested_node(inner_template: Template) -> None:
     """Test building a chain from pattern fails on missing nested node."""
-    template = Template("{field1}", field1=StrField(r".+"))
-
-    with pytest.raises(DefinitionError):
-        Chain.from_pattern("{chain1.field2}", chain1=template.to_node("chain1"))
+    with pytest.raises(DefinitionError, match=r"'chain1\.nope' is not a token"):
+        Chain.from_pattern("{chain1.nope.field1}", chain1=inner_template)
 
 
-def test_chain_splices_alias(bound_field: BoundField[str]) -> None:
+class _AliasModel(Model):
+    """Model whose declared template is an alias of the model."""
+
+    test: str = string(".+")
+    alias = model_template("<{test}>")
+
+
+def test_chain_splices_alias(field: StrField, holder: Template) -> None:
     """A chain shall replace an alias by the references of the alias chain."""
-    alias = ChainAlias(Chain.from_pattern("<{test}>", test=bound_field))
-    chain = Chain.from_pattern("{alias}/{test}", alias=alias, test=bound_field)
+    alias = ChainAlias(Chain.from_pattern("<{test}>", test=field), holder)
+    chain = Chain.from_pattern("{alias}/{test}", alias=alias, test=field)
 
     assert chain.to_regex() == r"<(?P<test>.+)>/(?P=test)"
+
+
+def test_chain_splices_alias_through_its_holder() -> None:
+    """The references of an alias shall go through the token holding the alias."""
+    chain = Chain.from_pattern("{model.alias}", model=_AliasModel.__token__)
+
+    assert chain.to_regex() == r"<(?P<model__test>.+)>"
+
+
+def test_alias_matches_value_of_its_holder() -> None:
+    """The value of an alias shall be the value of the token holding it."""
+    alias = _AliasModel.__token__.aliases["alias"]
+
+    assert alias.chain is _AliasModel.alias.chain
+    assert alias.to_regex() == r"<(?P<test>.+)>"
+    assert alias.parse_value({"test": "foo"}) == _AliasModel("foo")
+    assert alias.format_value(_AliasModel("foo")) == "<foo>"
 
 
 def test_cannot_initialize_chain_with_invalid_fields() -> None:
@@ -166,34 +188,48 @@ def test_cannot_initialize_chain_with_invalid_fields() -> None:
 
     We need to avoid this because it would otherwise
     """
-    bound_field1 = BoundField("field1", StrField(r".+"))
+    field1 = StrField(r".+")
 
     with pytest.raises(DefinitionError):
-        Chain.from_pattern("{_field1}", _field1=bound_field1)
+        Chain.from_pattern("{_field1}", _field1=field1)
 
     with pytest.raises(DefinitionError):
-        Chain.from_pattern("{field1_}", field1_=bound_field1)
+        Chain.from_pattern("{field1_}", field1_=field1)
 
     with pytest.raises(DefinitionError):
-        Chain.from_pattern("{fie__ld1}", fie__ld1=bound_field1)
+        Chain.from_pattern("{fie__ld1}", fie__ld1=field1)
 
 
-def test_chain_format(chain: Chain) -> None:
+def test_chain_format(chain: Chain, holder: Template) -> None:
     """Chain shall return expected format."""
-    assert chain.format({"reference": "test"}) == "starttestend"
+    assert chain.format({"reference": "test"}, holder) == "starttestend"
 
 
-def test_chain_alias_format(nested_chain: Chain) -> None:
-    """A chain alias shall format the value of the node holding it."""
-    alias = ChainAlias(nested_chain)
-    assert (
-        alias.format_value({"chain1": {"field1": "c1f1", "field2": "c1f2"}})
-        == "c1f1_c1f1_c1f2/c1f1_c1f2"
-    )
+def test_chain_formats_compound_with_its_chain(
+    nested_chain: Chain, inner_template: Template
+) -> None:
+    """A chain shall format a compound with its chain, from the value of the holder."""
+    holder = Template("{chain1}", chain1=inner_template)
+    value = {"chain1": {"field1": "c1f1", "field2": "c1f2"}}
+
+    assert nested_chain.format(value, holder) == "c1f1_c1f1_c1f2/c1f1_c1f2"
 
 
-def test_chain_alias_parse(nested_chain: Chain) -> None:
-    """A chain alias shall return the raw values of the node holding it."""
-    alias = ChainAlias(nested_chain)
-    data = {"chain1": {"field1": "c1f1", "field2": "c1f2"}}
-    assert alias.parse_value(data) == data
+@pytest.mark.parametrize(
+    ("delimiter", "open_token", "close_token", "expected_regex"),
+    [
+        (Delimiter.CURLY, "{", "}", r"\{([^\{\}]*(?:\.[^\{\}]*)*)\}"),
+        (Delimiter.ANGLE, "<", ">", r"<([^<>]*(?:\.[^<>]*)*)>"),
+        (Delimiter.SQUARE, "[", "]", r"\[([^\[\]]*(?:\.[^\[\]]*)*)\]"),
+    ],
+)
+def test_delimiter(
+    delimiter: Delimiter, open_token: str, close_token: str, expected_regex: str
+) -> None:
+    """Delimiter enum behaves as expected."""
+    assert isinstance(delimiter.value, tuple)
+    assert delimiter.token_open == open_token
+    assert delimiter.token_close == close_token
+    regex = delimiter.token_re()
+    assert isinstance(regex, re.Pattern)
+    assert regex.pattern == expected_regex

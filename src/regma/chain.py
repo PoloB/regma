@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import abc
+import enum
 import re
-from collections.abc import Mapping
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Generic
@@ -12,51 +12,90 @@ from typing import TypeVar
 
 from typing_extensions import override
 
-from regma.core import AnyNode
-from regma.core import Delimiter
-from regma.core import Node
-from regma.core import Token
 from regma.error import DefinitionError
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from collections.abc import Mapping
+
+    from regma.core import Token
+
+
+class Delimiter(enum.Enum):
+    """Field delimiter styles for string templates.
+
+    Examples:
+    CURLY  →  {asset_source.type}/{asset_source}
+    ANGLE  →  <asset_source.type>/<asset_source>
+    SQUARE →  [asset_source.type]/[asset_source]
+    """
+
+    CURLY = ("{", "}")
+    ANGLE = ("<", ">")
+    SQUARE = ("[", "]")
+
+    @property
+    def token_open(self) -> str:
+        """Return the open field of the delimiter."""
+        return self.value[0]
+
+    @property
+    def token_close(self) -> str:
+        """Return the close field of the delimiter."""
+        return self.value[1]
+
+    def token_re(self) -> re.Pattern[str]:
+        """Compile and return the regex that matches one field placeholder."""
+        o = re.escape(self.token_open)
+        c = re.escape(self.token_close)
+        ident = rf"[^{o}{c}]*"
+        return re.compile(rf"{o}({ident}(?:\.{ident})*){c}")
 
 
 class Reference:
-    """A referenced element in a template construction."""
+    """A referenced token in a template construction."""
 
-    def __init__(self, attribute_name: str, target: AnyNode) -> None:
-        """Initialize a FieldReference node."""
+    def __init__(self, attribute_name: str, target: Token[Any]) -> None:
+        """Initialize the reference to the given token, reached by the dotted name."""
         self.__name = attribute_name
         self._target = target
+        # The dotted name reaches the token through the names of the tokens holding it
+        *self._holder_names, self._target_name = attribute_name.split(".")
 
     @property
     def name(self) -> str:
-        """Return the name of the field attribute."""
+        """Return the dotted name of the referenced token."""
         return self.__name
 
     @property
-    def target(self) -> AnyNode:
-        """Return the referenced element."""
+    def target(self) -> Token[Any]:
+        """Return the referenced token."""
         return self._target
 
     def to_regex(self) -> str:
-        """Return the reference as a regex."""
-        return self.target.to_regex()
+        """Return the regex of the referenced token.
 
-    def format(self, value: object) -> str:
-        """Return the formatted value for the field.
+        Raises:
+            DefinitionError: the token cannot be matched as a whole.
+        """
+        try:
+            return self._target.to_regex()
+        except DefinitionError as e:
+            msg = f"Token {{{self.__name}}}: {e}"
+            raise DefinitionError(msg) from e
 
-        The value holds the value of each token by key, or by attribute for models.
+    def format(self, value: object, holder: Token[Any]) -> str:
+        """Return the formatted value of the referenced token.
+
+        The value is the one of the holder, the token holding the token which the
+        dotted name starts with, such as the template whose chain holds the reference.
         """
         ref_value: Any = value
-        for attr in self.__name.split("."):
-            ref_value = (
-                ref_value[attr]
-                if isinstance(ref_value, Mapping)
-                else getattr(ref_value, attr)
-            )
+        for attr in self._holder_names:
+            ref_value = holder.get_value(ref_value, attr)
+            holder = holder.tokens[attr]
 
+        ref_value = holder.get_value(ref_value, self._target_name)
         return self._target.format_value(ref_value)
 
 
@@ -116,11 +155,11 @@ class RegexBuilder(ChainVisitor[str]):
                 continue
 
             self._seen_reference_names.add(reference_name)
-            sub_chain = reference.target.to_chain()
+            sub_chain = reference.target.chain
 
             sub_regex = (
                 self.walk(sub_chain.through_name(reference.name))
-                if sub_chain
+                if sub_chain is not None
                 else reference.to_regex()
             )
             regexes.append(rf"(?P<{reference_name}>{sub_regex})")
@@ -129,8 +168,8 @@ class RegexBuilder(ChainVisitor[str]):
         return "".join(regexes)
 
 
-def _get_reference(tokens: dict[str, AnyNode], token_name: str) -> Reference:
-    """Return the field reference of the given token name."""
+def _reach_chain(tokens: Mapping[str, Token[Any]], token_name: str) -> Chain:
+    """Return the chain standing for the dotted token reached from the given tokens."""
     if token_name.startswith("_") or token_name.endswith("_") or "__" in token_name:
         msg = (
             f"Token {token_name} start or end with underscore or contains a "
@@ -138,34 +177,35 @@ def _get_reference(tokens: dict[str, AnyNode], token_name: str) -> Reference:
         )
         raise DefinitionError(msg)
 
-    # Find the targeted field
     attributes = token_name.split(".")
     if "" in attributes:
         message = f"Invalid token {token_name!r}"
         raise DefinitionError(message)
 
-    current_attr = attributes[0]
-
-    try:
-        lookup_node: AnyNode = tokens[current_attr]
-    except KeyError as e:
-        msg = f"No element {current_attr!r} provided to template"
-        raise DefinitionError(msg) from e
-
-    for attr in attributes[1:]:
-        sub_node = lookup_node.get_nodes().get(attr)
-        if sub_node is None:
-            msg = f"Invalid token {token_name!r}: {current_attr!r} has no {attr!r}"
+    # The dotted name reaches a token or an alias through the tokens holding it
+    *holder_names, name = attributes
+    aliases: Mapping[str, Token[Any]] = {}
+    for depth, attr in enumerate(holder_names, start=1):
+        holder = tokens.get(attr)
+        if holder is None:
+            path = ".".join(attributes[:depth])
+            msg = f"Invalid token {token_name!r}: {path!r} is not a token"
             raise DefinitionError(msg)
 
-        current_attr = f"{current_attr}.{attr}"
-        lookup_node = sub_node
+        tokens, aliases = holder.tokens, holder.aliases
 
-    return Reference(token_name, lookup_node)
+    token = aliases.get(name)
+    if token is None:
+        token = tokens.get(name)
+    if token is None:
+        msg = f"Invalid token {token_name!r}: neither a token nor an alias"
+        raise DefinitionError(msg)
+
+    return token.to_chain(token_name)
 
 
 class Chain:
-    """Ordered sequence of template nodes."""
+    """Ordered sequence of references, each followed by its separator."""
 
     @classmethod
     def empty(cls) -> Chain:
@@ -173,11 +213,14 @@ class Chain:
         return cls("", [])
 
     @classmethod
-    def from_pattern(cls, pattern: str, /, **kwargs: AnyNode) -> Chain:
-        """Return a chain constructed from the given pattern.
+    def from_pattern(cls, pattern: str, /, **tokens: Token[Any]) -> Chain:
+        """Return the chain of the pattern using the given tokens.
+
+        A dotted token reaches a token or an alias through the tokens holding it, and
+        each token stands for the chain of its own in the pattern.
 
         Raises:
-            DefinitionError: the chain is not constructed properly.
+            DefinitionError: a token of the pattern is invalid or reaches nothing.
         """
         token_re = Delimiter.CURLY.token_re()
         chain = Chain.empty()
@@ -185,20 +228,8 @@ class Chain:
 
         for m in token_re.finditer(pattern):
             start, end = m.span()
-            attr_name: str = m.group(1)
             chain.append_separator(pattern[cursor:start])
-
-            reference = _get_reference(kwargs, attr_name)
-            if isinstance(reference.target, ChainAlias):
-                # The alias stands for its references, through the node holding it
-                holder = attr_name.rpartition(".")[0]
-                alias_chain = reference.target.to_chain()
-                chain.append_chain(
-                    alias_chain.through_name(holder) if holder else alias_chain
-                )
-            else:
-                chain.append_reference(reference)
-
+            chain.append_chain(_reach_chain(tokens, m.group(1)))
             cursor = end
 
         chain.append_separator(pattern[cursor:])
@@ -234,6 +265,10 @@ class Chain:
 
     def append_separator(self, separator: str) -> None:
         """Add the string to the end of the chain."""
+        # Adjacent tokens and spliced chains add empty separators, changing nothing
+        if not separator:
+            return
+
         if not self._ref_seps:
             self._prefix = self._prefix + separator
         else:
@@ -248,56 +283,19 @@ class Chain:
         return self._prefix
 
     def iter_field_seps(self) -> Iterator[RefSep]:
-        """Return the ordered sequence of template nodes."""
+        """Return the references in order, each followed by its separator."""
         yield from self._ref_seps
 
     def to_regex(self) -> str:
         """Return the regex associated to the chain."""
         return RegexBuilder().walk(self)
 
-    def format(self, value: object) -> str:
-        """Return the formatted string of this chain."""
+    def format(self, value: object, holder: Token[Any]) -> str:
+        """Return the formatted string of this chain.
+
+        The value is the one of the holder, the token holding the tokens which the
+        references start with, such as the template of the chain.
+        """
         return self._prefix + "".join(
-            f"{n.reference.format(value)}{n.suffix}" for n in self._ref_seps
+            f"{n.reference.format(value, holder)}{n.suffix}" for n in self._ref_seps
         )
-
-
-class ChainAlias(Token, Node[object, dict[str, Any]]):
-    """A chain standing for references through the node holding it.
-
-    A template does not reference an alias as a node: it splices the chain of the alias
-    where the alias is used, its references going through the node holding the alias.
-    For example, the templates declared on a model are aliases of the model node, as
-    they stand for references to the fields of the model. As a token, an alias stands
-    for references to the other tokens of the template.
-    """
-
-    def __init__(self, chain: Chain) -> None:
-        """Initialize the alias of the given chain."""
-        self._chain = chain
-
-    @override
-    def to_node(self, name: str) -> ChainAlias:
-        return self
-
-    @override
-    def to_regex(self) -> str:
-        return self._chain.to_regex()
-
-    @override
-    def to_chain(self) -> Chain:
-        return self._chain
-
-    @override
-    def get_nodes(self) -> Mapping[str, AnyNode]:
-        # The nodes of the chain are reached through the node holding the alias
-        return {}
-
-    @override
-    def format_value(self, value: object) -> str:
-        # The value of an alias is the value of the node holding it
-        return self._chain.format(value)
-
-    @override
-    def parse_value(self, raw: dict[str, Any]) -> object:
-        return raw

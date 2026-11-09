@@ -1,75 +1,223 @@
-"""Chainable ABC, Separator, and Chain composite."""
+"""Tokens of the templates and strictness of the fields."""
 
 from __future__ import annotations
 
 import abc
 import enum
-import re
 from enum import auto
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Generic
+from typing import Protocol
 from typing import TypeVar
+
+from typing_extensions import override
+
+from regma.chain import Chain
+from regma.chain import Reference
+from regma.chain import RefSep
+from regma.error import DefinitionError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from regma.chain import Chain
+
+T_value = TypeVar("T_value")
 
 
-T_format = TypeVar("T_format", bound=Any)
-T_parse = TypeVar("T_parse", bound=Any)
+class SupportsToken(Protocol):
+    """Anything a template can use as a token, such as a token or a model."""
+
+    @property
+    @abc.abstractmethod
+    def __token__(self) -> Token[Any]:
+        """Return the token standing for this object in the templates using it."""
 
 
-class Node(abc.ABC, Generic[T_format, T_parse]):
-    """Anything that can participate in a template chain."""
+class Token(abc.ABC, Generic[T_value]):
+    """Anything a template can use as a token.
+
+    A token converts its value from and to the string it matches: the regex of the
+    token, such as a field, or the chain of its tokens, such as a template. Dotted names
+    reach the tokens building the value of a token, and its aliases. A new kind of
+    token subclasses this class, or :class:`Compound` to build its value from the
+    values of its tokens. Any other object a template uses provides its token through
+    ``__token__``, such as a model.
+    """
+
+    @property
+    def __token__(self) -> Token[T_value]:
+        """Return this token, which stands for itself in the templates using it."""
+        return self
+
+    @property
+    def tokens(self) -> Mapping[str, Token[Any]]:
+        """Return the tokens building the value of this token, by name.
+
+        By default, the token holds no other token.
+        """
+        return {}
+
+    @property
+    def aliases(self) -> Mapping[str, Token[Any]]:
+        """Return the aliases standing for tokens of this token, by name.
+
+        The aliases are the other tokens which dotted tokens reach through this token,
+        such as the templates declared on a model. By default, there is none.
+        """
+        return {}
+
+    @property
+    def chain(self) -> Chain | None:
+        """Return the chain matching this token, None if it has a regex of its own."""
+        return None
+
+    def to_chain(self, name: str) -> Chain:
+        """Return the chain standing for this token in a pattern using its dotted name.
+
+        By default, the chain references the token.
+        """
+        return Chain("", [RefSep(Reference(name, self), "")])
 
     @abc.abstractmethod
     def to_regex(self) -> str:
-        """Return the element as a regex."""
+        """Return the regex matching this token.
 
-    @abc.abstractmethod
-    def to_chain(self) -> Chain | None:
-        """Return the element as chain."""
-
-    @abc.abstractmethod
-    def format_value(self, value: T_format) -> str:
-        """Format the given value to a string."""
-
-    @abc.abstractmethod
-    def parse_value(self, raw: T_parse) -> T_format:
-        """Parse the given string and return the parsed value."""
-
-    def get_nodes(self) -> Mapping[str, AnyNode]:
-        """Return the nodes that dotted tokens reach through this node, by name.
-
-        By default, they are the nodes referenced by the chain of the node.
+        Raises:
+            DefinitionError: the token cannot be matched as a whole.
         """
-        chain = self.to_chain()
-        if chain is None:
-            return {}
 
-        return {
-            ref_sep.reference.name: ref_sep.reference.target
-            for ref_sep in chain.iter_field_seps()
-        }
+    @abc.abstractmethod
+    def parse_value(self, raw: Any) -> T_value:  # noqa: ANN401
+        """Return the value of this token from the strings it matched.
+
+        The string is the one matching its regex, or the strings matching its tokens,
+        nested by name.
+
+        Raises:
+            ParseError: the string is not valid for the token.
+        """
+
+    @abc.abstractmethod
+    def format_value(self, value: T_value) -> str:
+        """Return the string of the given value of this token.
+
+        Raises:
+            FormatError: the value is not valid for the token.
+        """
+
+    def get_value(self, value: T_value, name: str) -> object:
+        """Return the value of the named token from the value of this token.
+
+        By default, the value holds the values of the tokens as attributes.
+        """
+        return getattr(value, name)
 
 
-AnyNode = Node[Any, Any]
+class Compound(Token[T_value]):
+    """A token building its value from the values of its tokens, such as a model.
 
+    Parsing builds the value of a compound from the values of its tokens, and dotted
+    tokens reach them by name. A compound having a chain can also be used as a whole,
+    matching its chain, such as a template. For example, a date written as
+    year-month-day:
 
-class Token(abc.ABC):
-    """Anything a template can use as a token, such as a field, a template or a model.
+    class Date(Compound[datetime.date]):
+        def __init__(self) -> None:
+            self._tokens = {"year": integer(padding=4), "month": integer(padding=2),
+                            "day": integer(padding=2)}
+            self._chain = Chain.from_pattern("{year}-{month}-{day}", **self._tokens)
 
-    A template builds its chain from the nodes of its tokens: a dotted token reaches
-    the nodes of a node, and the regex builder expands the chain of a node having one.
-    A new kind of token only provides its node, either a leaf with a regex or a node
-    building its value from the nodes of its chain.
+        @property
+        def tokens(self) -> Mapping[str, Token[Any]]:
+            return self._tokens
+
+        @property
+        def chain(self) -> Chain:
+            return self._chain
+
+        def build_value(self, values: dict[str, Any]) -> datetime.date:
+            return datetime.date(**values)
+
+    template = Template("{shot}_{date}/{date.year}", shot=string("[a-z]+"), date=Date())
+
+    template.parse("foo_2024-05-01/2024")
+    # {"shot": "foo", "date": datetime.date(2024, 5, 1)}
     """
 
+    @property
     @abc.abstractmethod
-    def to_node(self, name: str) -> AnyNode:
-        """Return the node of this token in the chain of a template using it by name."""
+    @override
+    def tokens(self) -> Mapping[str, Token[Any]]:
+        """Return the tokens building the value of the compound, by name."""
+
+    @abc.abstractmethod
+    def build_value(self, values: dict[str, Any]) -> T_value:
+        """Return the value of the compound from the values of its tokens, by name."""
+
+    @override
+    def to_regex(self) -> str:
+        return self._get_chain().to_regex()
+
+    @override
+    def parse_value(self, raw: Mapping[str, Any]) -> T_value:
+        # The tokens without string have no value, the model reports the missing ones
+        values = {
+            name: token.parse_value(raw[name])
+            for name, token in self.tokens.items()
+            if name in raw
+        }
+        return self.build_value(values)
+
+    @override
+    def format_value(self, value: T_value) -> str:
+        return self._get_chain().format(value, self)
+
+    def _get_chain(self) -> Chain:
+        """Return the chain of the compound, which matches the compound as a whole."""
+        chain = self.chain
+        if chain is None:
+            msg = "the compound has no pattern of its own, reference its tokens instead"
+            raise DefinitionError(msg)
+
+        return chain
+
+
+class ChainAlias(Token[T_value]):
+    """A chain standing for references to tokens of its holder, the token holding it.
+
+    A pattern using an alias uses the references of its chain instead, through the
+    holder, such as the templates declared on a model. The value of an alias is the
+    value of its holder.
+    """
+
+    def __init__(self, chain: Chain, holder: Token[T_value]) -> None:
+        """Initialize the alias of the chain referencing tokens of the holder."""
+        self._chain = chain
+        self._holder = holder
+
+    @property
+    @override
+    def chain(self) -> Chain:
+        return self._chain
+
+    @override
+    def to_chain(self, name: str) -> Chain:
+        # The references go through the holder, which the dotted name ends with
+        holder_name = name.rpartition(".")[0]
+        return self._chain.through_name(holder_name) if holder_name else self._chain
+
+    @override
+    def to_regex(self) -> str:
+        return self._chain.to_regex()
+
+    @override
+    def parse_value(self, raw: Mapping[str, Any]) -> T_value:
+        return self._holder.parse_value(raw)
+
+    @override
+    def format_value(self, value: T_value) -> str:
+        return self._chain.format(value, self._holder)
 
 
 class Strictness(enum.Flag):
@@ -79,34 +227,3 @@ class Strictness(enum.Flag):
     PARSE = auto()
     FORMAT = auto()
     ALL = PARSE | FORMAT
-
-
-class Delimiter(enum.Enum):
-    """Field delimiter styles for string templates.
-
-    Examples:
-    CURLY  →  {asset_source.type}/{asset_source}
-    ANGLE  →  <asset_source.type>/<asset_source>
-    SQUARE →  [asset_source.type]/[asset_source]
-    """
-
-    CURLY = ("{", "}")
-    ANGLE = ("<", ">")
-    SQUARE = ("[", "]")
-
-    @property
-    def token_open(self) -> str:
-        """Return the open field of the delimiter."""
-        return self.value[0]
-
-    @property
-    def token_close(self) -> str:
-        """Return the close field of the delimiter."""
-        return self.value[1]
-
-    def token_re(self) -> re.Pattern[str]:
-        """Compile and return the regex that matches one field placeholder."""
-        o = re.escape(self.token_open)
-        c = re.escape(self.token_close)
-        ident = rf"[^{o}{c}]*"
-        return re.compile(rf"{o}({ident}(?:\.{ident})*){c}")

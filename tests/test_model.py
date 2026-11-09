@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 
+from regma import Compound
 from regma import DefinitionError
 from regma import FormatError
 from regma import Model
@@ -192,25 +193,31 @@ def test_declared_template_accepts_field_named_like_template_arguments() -> None
     }
 
 
-def test_model_is_a_token() -> None:
-    """A model shall be a token, its value being an instance of the model."""
+def test_model_provides_its_token() -> None:
+    """A model shall provide a token, its value being an instance of the model."""
     template = Template("sep/{foo_bar.name}", foo_bar=FooBarModel)
 
-    assert isinstance(FooBarModel, Token)
     assert template.parse("sep/foo_1") == {"foo_bar": FooBarModel("foo", 1)}
     assert template.format({"foo_bar": FooBarModel("foo", 1)}) == "sep/foo_1"
+    assert template.tokens["foo_bar"] is FooBarModel.__token__
+    assert not isinstance(FooBarModel, Token)
 
 
-def test_model_node_has_no_pattern() -> None:
-    """The node of a model shall neither match nor format the model as a whole."""
-    node = FooBarModel.to_node("foo_bar")
-    message = r"\{foo_bar\} is the model FooBarModel, which has no pattern of its own"
+def test_model_token_is_a_compound_without_pattern() -> None:
+    """A model token shall hold its fields and sub-models, its templates as aliases."""
+    token = ComplexModel.__token__
+    alias = FooBarModel.__token__.aliases["name"]
 
-    assert node.to_chain() is None
-    with pytest.raises(DefinitionError, match=message):
-        node.to_regex()
-    with pytest.raises(DefinitionError, match=message):
-        node.format_value(FooBarModel("foo", 1))
+    assert isinstance(token, Compound)
+    assert list(token.tokens) == ["foo_bar", "foo", "bar"]
+    assert token.tokens["foo_bar"] is FooBarModel.__token__
+    assert token.tokens["foo"] is ComplexModel.__fields__["foo"]
+    assert token.chain is None
+    assert list(FooBarModel.__token__.aliases) == ["name"]
+    assert alias.chain is FooBarModel.name.chain
+    assert token.parse_value(
+        {"foo_bar": {"foo": "a", "bar": "1"}, "foo": "b", "bar": "2"}
+    ) == (ComplexModel(FooBarModel("a", 1), "b", 2))
 
 
 def test_declared_template_can_be_used_as_template_token() -> None:
@@ -261,21 +268,34 @@ def test_definition_fails_if_field_contain_double_underscore() -> None:
             foo__bar: str = string(r"\w+")
 
 
-def test_definition_fails_if_attribute_shadows_token_method() -> None:
-    """No attribute shall hide the methods making the model a token."""
-    with pytest.raises(DefinitionError, match=r"\['mro', 'to_node'\]"):
+def test_definition_fails_if_attribute_shadows_metaclass_method() -> None:
+    """No attribute shall hide the public methods of the metaclass of the models."""
+    with pytest.raises(DefinitionError, match=r"\['mro'\]"):
 
         class _ElementModel(Model):
-            to_node: str = string(r"[a-z]+")
-            mro: FooBarModel
-
-    with pytest.raises(DefinitionError, match=r"\['to_node'\]"):
-
-        class _MethodModel(Model):
             name: str = string(r"[a-z]+")
+            mro: FooBarModel
+            template = model_template("{name}/{mro.name}")
 
-            def to_node(self) -> str:
-                return self.name
+
+def test_model_elements_can_take_names_of_token_methods() -> None:
+    """The model being no token, its elements shall take the names of token methods."""
+
+    class TestModel(Model):
+        tokens: str = string(r"[a-z]+")
+        aliases: FooBarModel
+        chain = model_template("{tokens}/{aliases.name}")
+
+        def build_value(self) -> str:
+            return self.tokens
+
+    model = TestModel("foo", FooBarModel("bar", 1))
+
+    assert TestModel.chain.parse("foo/bar_1") == {
+        "tokens": "foo",
+        "aliases": model.aliases,
+    }
+    assert model.build_value() == "foo"
 
 
 def test_definition_fails_if_element_shadows_model_method() -> None:
@@ -360,7 +380,7 @@ def test_definition_fails_referencing_whole_sub_model() -> None:
     A model has no pattern of its own so there is no way to build the regex of such
     token.
     """
-    with pytest.raises(DefinitionError, match=r"\{foo_bar\} is the model FooBarModel"):
+    with pytest.raises(DefinitionError, match=r"\{foo_bar\}: .* no pattern of its own"):
 
         class _TestModel(Model):
             foo_bar: FooBarModel

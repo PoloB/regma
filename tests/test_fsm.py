@@ -10,7 +10,6 @@ from regma import string
 from regma.chain import Chain
 from regma.chain import Reference
 from regma.error import ValidityError
-from regma.field import BoundField
 from regma.field import StrField
 from regma.fsm import CollisionResult
 from regma.fsm import FsmBuilder
@@ -37,7 +36,7 @@ def test_fsm_builder_cache() -> None:
     """Verify the cache of fsm builder is working."""
     fsm_cache = FsmRegexCache()
     fsm_builder = FsmBuilder(fsm_cache)
-    field = Reference("test", BoundField("test", StrField(".+")))
+    field = Reference("test", StrField(".+"))
     regex = field.to_regex()
     fsm = fsm_builder.build_fsm(regex)
     assert isinstance(fsm, greenery.Fsm)

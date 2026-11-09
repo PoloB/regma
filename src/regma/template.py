@@ -4,23 +4,22 @@ from __future__ import annotations
 
 import collections
 import re
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 from typing import Any
 
 from typing_extensions import override
 
 from regma.chain import Chain
-from regma.chain import ChainAlias
-from regma.core import Node
-from regma.core import Token
+from regma.core import Compound
 from regma.error import DefinitionError
 from regma.error import ParseError
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-    from collections.abc import Mapping
 
-    from regma.core import AnyNode
+    from regma.core import SupportsToken
+    from regma.core import Token
 
 
 def _nest_dict(data: dict[str, Any]) -> dict[str, Any]:
@@ -41,57 +40,25 @@ def _nest_dict(data: dict[str, Any]) -> dict[str, Any]:
     return nested_data
 
 
-def _iter_field_paths(nodes: Mapping[str, AnyNode]) -> Iterator[str]:
-    """Yield the dotted path of every field building the values of the given nodes."""
-    for name, node in nodes.items():
-        # An alias has no value of its own, it stands for nodes of its holder
-        if isinstance(node, ChainAlias):
-            continue
+def _iter_field_paths(tokens: Mapping[str, Token[Any]]) -> Iterator[str]:
+    """Yield the dotted path of every field building the values of the given tokens.
 
-        sub_nodes = node.get_nodes()
-        if not sub_nodes:
+    A field is a token holding no other token, its value being parsed from its string.
+    """
+    for name, token in tokens.items():
+        sub_tokens = token.tokens
+        if sub_tokens:
+            yield from (f"{name}.{path}" for path in _iter_field_paths(sub_tokens))
+        else:
             yield name
-            continue
-
-        yield from (f"{name}.{path}" for path in _iter_field_paths(sub_nodes))
 
 
-class _TemplateNode(Node[object, dict[str, Any]]):
-    """The node of a template, whose value holds the value of each of its tokens."""
-
-    def __init__(self, chain: Chain, nodes: Mapping[str, AnyNode]) -> None:
-        """Initialize the node from a template chain and the nodes of its tokens."""
-        self._chain = chain
-        self._nodes = nodes
-
-    @override
-    def to_regex(self) -> str:
-        return self._chain.to_regex()
-
-    @override
-    def to_chain(self) -> Chain:
-        return self._chain
-
-    @override
-    def format_value(self, value: object) -> str:
-        return self._chain.format(value)
-
-    @override
-    def parse_value(self, raw: dict[str, Any]) -> dict[str, Any]:
-        # The tokens missing from the pattern have no string, so no value
-        return {
-            name: node.parse_value(raw[name])
-            for name, node in self._nodes.items()
-            if name in raw
-        }
-
-
-class Template(Token):
+class Template(Compound[dict[str, Any]]):
     """A template converting the values of its tokens from and to a string.
 
-    A token is defined by a field, another template or a model, or any other
-    :class:`Token`. The tokens of a model reach its fields and declared templates
-    through dotted paths, and its value is an instance of the model:
+    A token is a field, another template or a model, or any other :class:`Token`.
+    Dotted tokens reach the fields and the declared templates of a model, and the value
+    of a model is an instance of the model:
 
     class Asset(Model):
         type: str = string("[a-z]+")
@@ -106,7 +73,7 @@ class Template(Token):
     The values only hold the tokens of the pattern, the other tokens are ignored.
     """
 
-    def __init__(self, pattern: str, /, **tokens: Token) -> None:
+    def __init__(self, pattern: str, /, **tokens: SupportsToken) -> None:
         """Initialize the template from its pattern and the definitions of its tokens.
 
         Raises:
@@ -114,16 +81,23 @@ class Template(Token):
                 matched, or the pattern does not reference all its fields.
         """
         self._pattern = pattern
-        nodes = {name: token.to_node(name) for name, token in tokens.items()}
-        self._node = _TemplateNode(Chain.from_pattern(pattern, **nodes), nodes)
-        self._regex = re.compile(self._node.to_regex())
+        # A model is not a token itself, it provides the token building its instances
+        all_tokens = {name: token.__token__ for name, token in tokens.items()}
+        self._chain = Chain.from_pattern(pattern, **all_tokens)
+        self._regex = re.compile(self._chain.to_regex())
+
+        # The tokens of the pattern, which dotted tokens reach through the template
+        used = {
+            ref_sep.reference.name.partition(".")[0]
+            for ref_sep in self._chain.iter_field_seps()
+        }
+        self._tokens = {
+            name: token for name, token in all_tokens.items() if name in used
+        }
 
         # Parsing builds the value of a token from all its fields
         captured = {name.replace("__", ".") for name in self._regex.groupindex}
-        used_nodes = {
-            name: nodes[name] for name in {path.partition(".")[0] for path in captured}
-        }
-        missing = sorted(set(_iter_field_paths(used_nodes)) - captured)
+        missing = sorted(set(_iter_field_paths(self._tokens)) - captured)
         if missing:
             msg = f"Template {pattern!r} does not reference fields {missing}"
             raise DefinitionError(msg)
@@ -134,9 +108,16 @@ class Template(Token):
         return self._pattern
 
     @property
+    @override
+    def tokens(self) -> Mapping[str, Token[Any]]:
+        """Return the tokens of the pattern, by name."""
+        return self._tokens
+
+    @property
+    @override
     def chain(self) -> Chain:
         """Return the chain associated to this template."""
-        return self._node.to_chain()
+        return self._chain
 
     @property
     def regex(self) -> re.Pattern[str]:
@@ -149,7 +130,7 @@ class Template(Token):
         The value holds the value of each token by key, or by attribute such as a model
         instance for the templates declared on its model.
         """
-        return self._node.format_value(value)
+        return self._chain.format(value, self)
 
     def parse(self, raw: str) -> dict[str, Any]:
         """Parse the given string and return the value of each token of the pattern.
@@ -167,9 +148,13 @@ class Template(Token):
         groups = {
             name.replace("__", "."): value for name, value in data.groupdict().items()
         }
-        return self._node.parse_value(_nest_dict(groups))
+        return self.parse_value(_nest_dict(groups))
 
     @override
-    def to_node(self, name: str) -> AnyNode:
-        # The same node for any name, the template using it naming its references
-        return self._node
+    def build_value(self, values: dict[str, Any]) -> dict[str, Any]:
+        return values
+
+    @override
+    def get_value(self, value: object, name: str) -> object:
+        # The templates declared on a model also format the instances of the model
+        return value[name] if isinstance(value, Mapping) else getattr(value, name)

@@ -351,9 +351,9 @@ class ReuseInspector(ChainVisitor[None]):
 
             self._seen_reference_names.add(reference.name)
             self._is_reused[reference.name] = False
-            sub_chain = reference.target.to_chain()
+            sub_chain = reference.target.chain
 
-            if sub_chain:
+            if sub_chain is not None:
                 self.walk(sub_chain.through_name(reference.name))
 
     def is_reused(self, reference_name: str) -> bool:
